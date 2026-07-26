@@ -45,6 +45,11 @@
   .key{border-left:4px solid var(--okline);background:var(--okbg);
        padding:1rem 1.2rem;border-radius:6px;margin:2rem 0}
   a{color:var(--accent)}
+  figure{margin:2.5rem 0}
+  figure img{width:100%;height:auto;display:block;border-radius:8px;
+             border:1px solid var(--line)}
+  figcaption{color:var(--muted);font-size:.84rem;margin-top:.7rem;line-height:1.55}
+  figure.narrow{max-width:23rem;margin-left:auto;margin-right:auto}
   footer{margin:4rem 0 3rem;padding-top:1.5rem;border-top:1px solid var(--line);
          color:var(--muted);font-size:.9rem}
 </style>
@@ -61,6 +66,24 @@
   <p class="meta">A debugging write-up, July 2026. Everything below is measured
   on a live system; the commands to reproduce it are at the end.</p>
 </header>
+
+<figure>
+  <img src="img/switchboard-patching.jpg" alt="A 1943 telephone operator reaching up to patch a cord into a switchboard jack field, headset on, cords running everywhere.">
+  <figcaption>Private branch exchange operator at her switchboard, Kansas City,
+  1943. Library of Congress, Farm Security Administration / Office of War
+  Information Black-and-White Negatives —
+  <a href="https://www.loc.gov/item/2017847312/">public domain</a>.</figcaption>
+</figure>
+
+<p>A Flatpak portal is a switchboard operator. The sandboxed app cannot reach
+the host directly; it asks to be connected, and a trusted intermediary patches
+the circuit on its behalf. That is the entire security model — mediated access
+rather than direct access, with someone in the middle who can log the request,
+scope it, or refuse it. When <code>flatpak-spawn</code> passes file descriptors
+0, 1 and 2 across D-Bus, it is handing over a plug to be pushed into a jack.</p>
+
+<p>Hold onto that image, because the bug below is exactly the thing a
+switchboard cannot do.</p>
 
 <p>The advice is everywhere: if a Flatpak app needs to touch the host, use
 <code>flatpak-spawn --host</code>. For a terminal emulator that means overriding
@@ -79,6 +102,13 @@ tty: ttyname error: No such device</code></pre>
 files are all there. But <kbd>Ctrl+Z</kbd> does nothing, <code>fg</code> and
 <code>bg</code> are gone, and <code>tty</code> cannot name your terminal. It is
 the kind of breakage you learn to step around without ever diagnosing.</p>
+
+<p>In switchboard terms: the operator patched the voice circuit through
+perfectly. Both parties can hear each other. What did not come across the patch
+is everything that isn't <em>on</em> the wire — the registrations back at the
+exchange that say who this line belongs to, and who gets rung when something
+happens on it. The shell got the audio and none of the line. It could talk, but
+it could not be <em>rung</em>.</p>
 
 <h2>What job control actually requires</h2>
 
@@ -210,6 +240,10 @@ the terminal changed size. Newly started programs are fine, because they read
 the size directly with <code>TIOCGWINSZ</code>. That is exactly why the
 misbehaviour feels random in daily use.</p>
 
+<p>Back at the switchboard: the operator relays eight kinds of supervisory
+signal down the line and silently drops the ninth. Nobody thought to pass on
+"the other party has moved to a bigger room."</p>
+
 <h2>The obvious fix, and why it fails</h2>
 
 <p>An Alacritty maintainer's passing suggestion was to wrap the shell in
@@ -262,6 +296,21 @@ terminal is free.</p>
 <p>So the fix is <strong>subtraction, not addition</strong>. Nothing needs to be
 built to acquire the terminal. Something just needs to stop stealing it first.</p>
 </div>
+
+<figure class="narrow">
+  <img src="img/switchboard-operator.jpg" alt="A telephone operator seated at an airport switchboard in 1941, working the cords.">
+  <figcaption>Airport switchboard, Washington D.C., 1941. Library of Congress,
+  FSA/OWI —
+  <a href="https://www.loc.gov/item/2017795320/">public domain</a>.</figcaption>
+</figure>
+
+<p>This is also where the switchboard analogy stops being a metaphor and starts
+being a contrast. A real operator can transfer a line — unplug it here, plug it
+in there, reassign who the subscriber is. <code>TIOCSCTTY</code> cannot. The
+claim is first-come and permanent, so once the proxy is on the books, nobody can
+ever be registered in its place. Which is why the answer is not "hand the line
+over" but "run a fresh line, and let the operator register it to the right party
+from the start."</p>
 
 <p>Which makes the whole fix a small relay that sits between Alacritty and
 <code>flatpak-spawn</code> and opens a second PTY it never claims:</p>
@@ -372,6 +421,9 @@ never to the Alacritty project.
   <a href="./">← Back to the project</a> ·
   <a href="https://github.com/superuser-miguel/alacritty-flatpak/blob/main/Findings.md">Findings.md</a> ·
   <a href="https://github.com/superuser-miguel/alacritty-flatpak/blob/main/flatpak/alacritty-host-shell">the relay source</a>
+  <p style="margin-top:1.2rem">Photographs: U.S. Library of Congress, Farm
+  Security Administration / Office of War Information Black-and-White Negatives.
+  The collection is in the public domain and free to use and reuse.</p>
 </footer>
 
 </div>
