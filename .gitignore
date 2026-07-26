@@ -1,0 +1,8 @@
+# flatpak-builder output — all regenerable from the manifest
+flatpak/.flatpak-builder/
+flatpak/build/
+flatpak/repo/
+flatpak/*.flatpak
+
+# Local Claude Code settings
+.claude/settings.local.json
