@@ -34,9 +34,8 @@ the host to spawn processes there. Upstream's objection is that both outcomes
 are bad, so terminals are a poor fit for the model on principle.
 
 This build takes the second path, using the mechanism an Alacritty maintainer
-suggested in passing: override `terminal.shell` to launch
-`flatpak-spawn --host bash -l`. The GPU and UI process stay sandboxed; the shell
-session runs on the host.
+suggested in passing: override `terminal.shell` so the shell is launched on the
+host. The GPU and UI process stay sandboxed; the shell session runs on the host.
 
 Verified rather than assumed — comparing `/proc/<pid>/ns/mnt` across the three
 processes:
@@ -51,6 +50,35 @@ This is the same trick [Ptyxis](https://gitlab.gnome.org/chergert/ptyxis) uses i
 production, via its separately host-spawned `ptyxis-agent`. See
 [`Findings.md`](Findings.md) for the full write-up and a comparison with GNOME
 Terminal, which has no Flatpak at all.
+
+## The part everyone gets wrong
+
+Getting the shell onto the host is the easy half, and it is where most write-ups
+about `flatpak-spawn` stop. The half nobody mentions is that `flatpak-spawn`
+hands the **controlling terminal** to the proxy rather than to your shell.
+
+`TIOCSCTTY` is an exclusive, one-shot claim: the first session to grab a PTY owns
+it permanently. Alacritty does the textbook thing — `setsid()` + `TIOCSCTTY` in
+its child, then `exec` — but that child is `flatpak-spawn`, which only makes a
+D-Bus call. The proxy performs the land grab; the real shell is spawned
+separately by the portal and arrives to find the terminal taken. It starts with
+no controlling terminal at all:
+
+```
+1824071  flatpak-spawn --host bash -l   pts/0  Ssl+    <- proxy owns the terminal
+1824076  bash -l                        ?      Ss      <- the actual shell
+```
+
+So `Ctrl+Z`, `fg`, `bg` and `jobs` silently stop working, `tty` cannot name your
+terminal, and window resizes never reach anything running in the shell.
+
+This build fixes it with [`flatpak/alacritty-host-shell`](flatpak/alacritty-host-shell),
+a ~60-line PTY relay that opens a second PTY and **deliberately never claims
+it** — which lets the portal hand it to the shell, where it belongs. The relay
+also forwards `SIGWINCH`, which `flatpak-spawn` does not, so live resize works.
+
+📄 **[The sandboxed terminal that lost its job control](https://superuser-miguel.github.io/alacritty-flatpak/pty-job-control.html)**
+— the full debugging write-up, with measurements and reproduction steps.
 
 ## Configuration
 

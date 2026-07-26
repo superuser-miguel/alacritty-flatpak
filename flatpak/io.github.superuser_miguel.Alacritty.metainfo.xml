@@ -45,6 +45,19 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.17.0-2" date="2026-07-26">
+      <description>
+        <p>
+          Fixes job control in the host shell. Launching the shell through
+          flatpak-spawn handed the controlling terminal to the proxy process
+          rather than to the shell, so Ctrl+Z, fg and bg silently did nothing,
+          tty could not name the terminal, and window resizes never reached
+          running programs. The shell now goes through a PTY relay that leaves
+          the terminal unclaimed so the portal can hand it to the shell, and
+          which forwards SIGWINCH.
+        </p>
+      </description>
+    </release>
     <release version="0.17.0" date="2026-07-25">
       <description>
         <p>First packaged release. Builds Alacritty v0.17.0 from source.</p>

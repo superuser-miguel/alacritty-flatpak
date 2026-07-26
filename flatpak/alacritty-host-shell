@@ -1,0 +1,179 @@
+#!/usr/bin/env python3
+"""Run a login shell on the host, with a controlling terminal that works.
+
+Background
+----------
+Overriding Alacritty's `terminal.shell` to `flatpak-spawn --host bash -l` puts
+the shell on the host, but it silently breaks job control:
+
+    bash: cannot set terminal process group (-1): Inappropriate ioctl for device
+    bash: no job control in this shell
+
+`TIOCSCTTY` is an exclusive, one-shot claim: the first session to grab a PTY
+owns it, and no other session can ever take it. Alacritty does the textbook
+thing — `setsid()` + `TIOCSCTTY` in its child, then `exec` — but under the
+Flatpak that child is `flatpak-spawn`, a proxy that does nothing but forward a
+D-Bus request. The proxy ends up owning the terminal. The real shell is spawned
+separately by the Flatpak portal, in a different process tree, and by the time
+it arrives the terminal is taken. It starts with no controlling terminal at all.
+
+The fix is subtraction, not addition. The portal's own child setup makes the
+host process a session leader and hands it the terminal *automatically* —
+but only if the terminal is still free. So all that is needed is a PTY nobody
+has claimed yet.
+
+What this does
+--------------
+Sits between Alacritty and `flatpak-spawn` and opens a second PTY that it
+deliberately never claims:
+
+    alacritty ─(outer PTY, claimed by us — unavoidable)─ this relay
+                                                           │
+                                    (inner PTY, left unclaimed)
+                                                           │
+                             flatpak-spawn --host ──▶ portal ──▶ bash -l
+                                                       claims the inner PTY
+                                                       for the host shell ✓
+
+Alacritty claims the outer PTY on *us*, which is fine and unavoidable. The
+inner PTY is handed over untouched, so the host shell gets it and job control
+works.
+
+Two further details fall out of the sandwich:
+
+* The outer terminal is put into raw mode, so control characters pass through
+  as bytes instead of being interpreted twice. `Ctrl+C` and `Ctrl+Z` are
+  handled by the *inner* line discipline, which is the one the host shell's
+  jobs are attached to.
+* `flatpak-spawn` forwards HUP/INT/QUIT/USR1/USR2/TERM/CONT/TSTP to the host
+  process, but *not* `SIGWINCH` — so without this relay, resizing the window
+  never reaches anything running in the shell. We are the foreground process
+  group of the outer PTY, so we do receive `SIGWINCH`, and we copy the new
+  size onto the inner PTY. Live resize works.
+
+Usage:  alacritty-host-shell [command [args...]]     (default: bash -l)
+"""
+
+import errno
+import fcntl
+import os
+import pty
+import select
+import signal
+import sys
+import termios
+
+BUFSIZE = 65536
+OUTER = 0  # Alacritty's PTY, as stdin/stdout
+
+
+def copy_winsize(src_fd, dst_fd):
+    """Mirror the terminal window size from one PTY onto another."""
+    try:
+        packed = fcntl.ioctl(src_fd, termios.TIOCGWINSZ, b"\0" * 8)
+        fcntl.ioctl(dst_fd, termios.TIOCSWINSZ, packed)
+    except OSError:
+        pass  # not a tty, or it went away; nothing useful to do either way
+
+
+def set_raw(fd):
+    """Put the outer terminal into raw mode, returning the old settings.
+
+    The inner PTY keeps a normal line discipline, so it is the one that turns
+    ^C into SIGINT for the host shell's foreground job. Interpreting control
+    characters at both layers would deliver signals to this relay instead.
+    """
+    old = termios.tcgetattr(fd)
+    new = termios.tcgetattr(fd)
+    new[0] &= ~(termios.IGNBRK | termios.BRKINT | termios.PARMRK | termios.ISTRIP
+                | termios.INLCR | termios.IGNCR | termios.ICRNL | termios.IXON)
+    new[1] &= ~termios.OPOST
+    new[2] &= ~(termios.CSIZE | termios.PARENB)
+    new[2] |= termios.CS8
+    new[3] &= ~(termios.ECHO | termios.ECHONL | termios.ICANON | termios.ISIG
+                | termios.IEXTEN)
+    new[6][termios.VMIN] = 1
+    new[6][termios.VTIME] = 0
+    termios.tcsetattr(fd, termios.TCSANOW, new)
+    return old
+
+
+def main():
+    command = sys.argv[1:] or ["bash", "-l"]
+
+    master, slave = pty.openpty()
+    # Deliberately NO setsid() and NO TIOCSCTTY here. Leaving the inner PTY
+    # unclaimed is the entire point: it lets the portal give it to the host
+    # shell, which is the process that actually needs it.
+
+    copy_winsize(OUTER, master)
+
+    pid = os.fork()
+    if pid == 0:
+        os.close(master)
+        for fd in (0, 1, 2):
+            os.dup2(slave, fd)
+        if slave > 2:
+            os.close(slave)
+        os.execvp("flatpak-spawn", ["flatpak-spawn", "--host"] + command)
+        os._exit(127)
+
+    os.close(slave)
+
+    signal.signal(signal.SIGWINCH, lambda *_: copy_winsize(OUTER, master))
+
+    try:
+        old_termios = set_raw(OUTER)
+    except termios.error:
+        old_termios = None  # not a terminal (piped); relay bytes anyway
+
+    try:
+        _pump(master)
+    finally:
+        if old_termios is not None:
+            try:
+                termios.tcsetattr(OUTER, termios.TCSAFLUSH, old_termios)
+            except termios.error:
+                pass
+        os.close(master)
+
+    _, status = os.waitpid(pid, 0)
+    if os.WIFEXITED(status):
+        sys.exit(os.WEXITSTATUS(status))
+    sys.exit(128 + os.WTERMSIG(status))
+
+
+def _pump(master):
+    """Copy bytes between the outer terminal and the inner PTY until EOF."""
+    fds = [OUTER, master]
+    while True:
+        try:
+            readable, _, _ = select.select(fds, [], [])
+        except InterruptedError:
+            continue  # a SIGWINCH landed mid-select
+
+        for fd in readable:
+            try:
+                data = os.read(fd, BUFSIZE)
+            except OSError as exc:
+                # The kernel reports a hung-up PTY master as EIO, not EOF.
+                if exc.errno in (errno.EIO, errno.EBADF):
+                    return
+                raise
+            if not data:
+                return
+            _write_all(master if fd == OUTER else 1, data)
+
+
+def _write_all(fd, data):
+    while data:
+        try:
+            data = data[os.write(fd, data):]
+        except OSError as exc:
+            if exc.errno in (errno.EIO, errno.EPIPE, errno.EBADF):
+                return
+            raise
+
+
+if __name__ == "__main__":
+    main()

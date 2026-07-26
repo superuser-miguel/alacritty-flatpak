@@ -24,11 +24,18 @@ finish-args:
   - --socket=fallback-x11
   - --share=ipc
   - --device=dri
-  # Needed so `flatpak-spawn --host` (used by the shell override in
-  # ~/.config/alacritty/flatpak.toml) can reach the host over the session bus.
+  # Needed so `flatpak-spawn --host` (used by /app/libexec/alacritty-host-shell)
+  # can reach the host over the session bus. This is already full arbitrary
+  # command execution on the host — it is what makes the terminal a terminal.
   - --talk-name=org.freedesktop.Flatpak
   # A terminal is useless if it can't see your real filesystem.
   - --filesystem=home
+  # Shares the host's /dev instead of a private one. Without it the sandbox
+  # gets its own devpts instance, so the PTY has no device node the host can
+  # name: `ttyname()` fails and `tty`, `who` and utmp break. Grants nothing new
+  # on top of --talk-name=org.freedesktop.Flatpak above, which is already
+  # arbitrary host execution.
+  - --device=all
 
 modules:
   - name: alacritty
@@ -45,6 +52,9 @@ modules:
       # The shell override that makes the sandboxed terminal usable. Shipped
       # inside the app so it works on any machine, not just the build host.
       - install -Dm644 flatpak.toml /app/share/alacritty/flatpak.toml
+      # PTY relay that gives the host shell a real controlling terminal.
+      # python3 ships in the freedesktop Platform, so no host dependency.
+      - install -Dm755 alacritty-host-shell /app/libexec/alacritty-host-shell
     sources:
       - type: git
         url: https://github.com/alacritty/alacritty.git
@@ -56,3 +66,5 @@ modules:
         path: io.github.superuser_miguel.Alacritty.metainfo.xml
       - type: file
         path: flatpak.toml
+      - type: file
+        path: alacritty-host-shell

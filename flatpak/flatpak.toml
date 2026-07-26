@@ -4,9 +4,16 @@
 # by the desktop entry. It must not reference any absolute home directory —
 # this file ships to whatever machine installs the app.
 #
-# What it does: hands the login shell off to `flatpak-spawn --host`, so the
-# shell runs on the real host instead of inside the Flatpak sandbox. Without
-# this the terminal opens into the runtime's filesystem and is near-useless.
+# What it does: hands the login shell off to the host, so it runs on the real
+# host instead of inside the Flatpak sandbox. Without this the terminal opens
+# into the runtime's filesystem and is near-useless.
+#
+# It goes through /app/libexec/alacritty-host-shell rather than calling
+# `flatpak-spawn --host` directly. Calling flatpak-spawn directly does put the
+# shell on the host, but the *proxy* ends up owning the terminal, so the shell
+# gets no controlling terminal and loses job control (no Ctrl+Z, no fg/bg).
+# The relay opens a second PTY and deliberately leaves it unclaimed so the
+# portal can give it to the shell. See the comments in that file.
 #
 # Your own settings still apply: the import below pulls in the standard
 # per-user config if it exists. Alacritty merges imports with the importing
@@ -18,5 +25,5 @@
 import = ["~/.config/alacritty/alacritty.toml"]
 
 [terminal.shell]
-program = "flatpak-spawn"
-args = ["--host", "bash", "-l"]
+program = "/app/libexec/alacritty-host-shell"
+args = ["bash", "-l"]

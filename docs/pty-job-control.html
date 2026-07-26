@@ -1,0 +1,379 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The sandboxed terminal that lost its job control</title>
+<meta name="description" content="flatpak-spawn --host puts your shell on the host, but hands the controlling terminal to the wrong process. Why, how to see it, and the fix.">
+<style>
+  :root{
+    --bg:#fbfbfd; --fg:#1c1c1f; --muted:#5b5b66; --line:#e4e4ea;
+    --card:#fff; --accent:#c2410c; --warnbg:#fffbeb; --warnline:#d97706;
+    --code:#f4f4f7; --okbg:#f0fdf4; --okline:#16a34a;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#0f0f12; --fg:#e9e9ee; --muted:#a0a0ad; --line:#26262e;
+      --card:#17171c; --accent:#fb923c; --warnbg:#2a2010; --warnline:#d97706;
+      --code:#1c1c22; --okbg:#0f2016; --okline:#16a34a;
+    }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+       font-family:system-ui,-apple-system,"Segoe UI",sans-serif;line-height:1.65}
+  .wrap{max-width:46rem;margin:0 auto;padding:0 1.25rem}
+  header{padding:4rem 0 1.5rem}
+  .back{color:var(--muted);text-decoration:none;font-size:.9rem}
+  .back:hover{color:var(--accent)}
+  h1{font-size:clamp(1.8rem,5vw,2.6rem);margin:1.2rem 0 .5rem;letter-spacing:-.02em}
+  .tag{color:var(--muted);font-size:1.06rem;margin:0}
+  .meta{color:var(--muted);font-size:.85rem;margin-top:1.2rem;
+        padding-top:1.2rem;border-top:1px solid var(--line)}
+  h2{margin:3rem 0 .8rem;font-size:1.35rem;letter-spacing:-.01em}
+  h3{margin:2rem 0 .6rem;font-size:1.08rem}
+  code{background:var(--code);padding:.15em .4em;border-radius:4px;font-size:.9em}
+  pre{background:var(--code);padding:1rem;border-radius:8px;overflow-x:auto;
+      border:1px solid var(--line);font-size:.88rem;line-height:1.5}
+  pre code{background:none;padding:0;font-size:1em}
+  table{width:100%;border-collapse:collapse;margin:1.2rem 0;font-size:.94rem;
+        display:block;overflow-x:auto}
+  th,td{text-align:left;padding:.6rem .7rem;border-bottom:1px solid var(--line);
+        vertical-align:top}
+  th{font-weight:600}
+  .warn{border-left:4px solid var(--warnline);background:var(--warnbg);
+        padding:1rem 1.2rem;border-radius:6px;margin:2rem 0}
+  .key{border-left:4px solid var(--okline);background:var(--okbg);
+       padding:1rem 1.2rem;border-radius:6px;margin:2rem 0}
+  a{color:var(--accent)}
+  footer{margin:4rem 0 3rem;padding-top:1.5rem;border-top:1px solid var(--line);
+         color:var(--muted);font-size:.9rem}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <a class="back" href="./">← Alacritty, unofficial Flatpak</a>
+  <h1>The sandboxed terminal that lost its job control</h1>
+  <p class="tag"><code>flatpak-spawn --host</code> really does put your shell on
+  the host. It also quietly hands the controlling terminal to the wrong process
+  — and nothing tells you.</p>
+  <p class="meta">A debugging write-up, July 2026. Everything below is measured
+  on a live system; the commands to reproduce it are at the end.</p>
+</header>
+
+<p>The advice is everywhere: if a Flatpak app needs to touch the host, use
+<code>flatpak-spawn --host</code>. For a terminal emulator that means overriding
+the shell command, and it works — the shell that opens really is running on your
+real system, in your real home directory, in the host's mount namespace. I
+verified that part months ago and shipped it.</p>
+
+<p>What I did not check was whether the shell was <em>healthy</em>. It wasn't.
+Every new window opened with this:</p>
+
+<pre><code>bash: cannot set terminal process group (-1): Inappropriate ioctl for device
+bash: no job control in this shell
+tty: ttyname error: No such device</code></pre>
+
+<p>You still get a prompt. <code>ls</code> works, <code>git</code> works, your
+files are all there. But <kbd>Ctrl+Z</kbd> does nothing, <code>fg</code> and
+<code>bg</code> are gone, and <code>tty</code> cannot name your terminal. It is
+the kind of breakage you learn to step around without ever diagnosing.</p>
+
+<h2>What job control actually requires</h2>
+
+<p>Three kernel concepts sit underneath this, and most of us never have to think
+about any of them:</p>
+
+<table>
+  <thead><tr><th>Concept</th><th>What it is</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Process group</strong></td><td>Processes that receive terminal signals together. One pipeline is one process group.</td></tr>
+    <tr><td><strong>Session</strong></td><td>A collection of process groups, created by <code>setsid()</code>. The creator becomes the <em>session leader</em>.</td></tr>
+    <tr><td><strong>Controlling terminal</strong></td><td>One terminal, owned by one session. The kernel routes <code>SIGINT</code>, <code>SIGTSTP</code>, <code>SIGHUP</code> and <code>SIGWINCH</code> to the <em>foreground process group</em> of that session.</td></tr>
+  </tbody>
+</table>
+
+<p>Two rules matter here, both enforced by the kernel:</p>
+
+<ol>
+  <li><code>TIOCSCTTY</code> — the ioctl that claims a terminal — succeeds only
+  if the caller <strong>is a session leader</strong> and the terminal
+  <strong>is not already the controlling terminal of another session</strong>.</li>
+  <li>A shell can only do job control if it <strong>has</strong> a controlling
+  terminal.</li>
+</ol>
+
+<p>Rule 1 is a one-shot land grab. The first session to claim a PTY owns it
+permanently, and no one else can take it. That single sentence explains the
+entire bug.</p>
+
+<h2>What a normal terminal does</h2>
+
+<pre><code>alacritty
+ └─ openpty()               master kept by alacritty, slave for the child
+     └─ fork()
+         └─ setsid()        child becomes a session leader
+            TIOCSCTTY       ← claims the PTY; it is free, so this succeeds
+            exec bash -l    bash inherits the terminal; job control works</code></pre>
+
+<p>Textbook, and entirely correct. The process that <code>exec</code>s into the
+shell is the session leader holding the terminal.</p>
+
+<h2>What happens inside the sandbox</h2>
+
+<p>Under Flatpak, that final <code>exec</code> is not the shell. It is
+<code>flatpak-spawn</code>, a proxy whose whole job is to make a D-Bus call to
+the Flatpak portal — which then starts the real shell out on the host and passes
+the file descriptors across.</p>
+
+<p>So the process tree splits in two, and <code>ps</code> shows it plainly:</p>
+
+<pre><code>1824050  alacritty                                   (in the sandbox)
+1824071   └─ flatpak-spawn --host bash -l   pts/0 Ssl+   ← sandbox side
+6183     flatpak-portal                              (on the host)
+1824076   └─ bash -l                        ?     Ss     ← the actual shell</code></pre>
+
+<p>Read the two right-hand columns carefully. <code>flatpak-spawn</code> — a
+proxy that will never read a keystroke in its life — is <code>Ss+</code> on
+<code>pts/0</code>: session leader, foreground process group, holding the
+terminal. The real <code>bash</code> shows <code>?</code>. No controlling
+terminal at all. It is not even a descendant of Alacritty; it is a child of the
+portal, in a different process tree entirely.</p>
+
+<p>Straight from the kernel — field 7 of <code>/proc/&lt;pid&gt;/stat</code> is
+<code>tty_nr</code>, the controlling terminal, where <code>0</code> means
+none:</p>
+
+<pre><code>$ awk '{print $7}' /proc/1824076/stat
+0</code></pre>
+
+<div class="key">
+<p><strong>There it is.</strong> Alacritty did everything right. But its child
+was the proxy, not the shell — so the proxy performed the land grab. By rule 1
+that claim is exclusive and permanent, so when the portal later tries to give
+the same terminal to the real shell, it can't. The shell starts with nothing,
+<code>tcgetpgrp()</code> returns <code>-1</code>, and job control is disabled.</p>
+<p>The sandbox escape didn't fail. It succeeded <em>one process too early</em>.</p>
+</div>
+
+<h2>The second, unrelated bug</h2>
+
+<p><code>tty: ttyname error: No such device</code> has a completely different
+cause, which is worth separating because it looks like part of the same
+failure.</p>
+
+<p><code>ttyname()</code> does not ask the kernel what your terminal is called.
+It <code>stat()</code>s the descriptor and then walks <code>/dev/pts</code>
+looking for a device node with a matching device number. That only works if the
+PTY's node is visible in <em>your</em> <code>/dev/pts</code>.</p>
+
+<p>It isn't. Flatpak's bwrap gives the sandbox a private devpts instance:</p>
+
+<pre><code>sandbox:  2148 2141 0:158 / /dev/pts rw,nosuid,noexec,relatime - devpts …
+host:       43   39 0:28  / /dev/pts rw,nosuid,noexec,relatime - devpts …</code></pre>
+
+<p><code>0:158</code> against <code>0:28</code> — different filesystems. The PTY
+came from the sandbox's instance. The host-side shell holds a perfectly valid
+descriptor to it, but no path on the host names it, so <code>ttyname()</code>
+fails. Everything that resolves a terminal by name goes with it:
+<code>tty</code>, <code>who</code>, <code>w</code>, utmp bookkeeping.
+<code>/dev/tty</code> still works, because that resolves through the controlling
+terminal rather than a path.</p>
+
+<h2>What survives, and what doesn't</h2>
+
+<table>
+  <thead><tr><th></th><th>Works?</th><th>Why</th></tr></thead>
+  <tbody>
+    <tr><td>Shell runs on the host</td><td>✅</td><td>its mount namespace matches the host's exactly</td></tr>
+    <tr><td><kbd>Ctrl+C</kbd>, <code>SIGHUP</code> on close</td><td>✅</td><td><code>flatpak-spawn</code> catches these and re-sends them through the portal</td></tr>
+    <tr><td><kbd>Ctrl+Z</kbd>, <code>fg</code>, <code>bg</code>, <code>jobs</code></td><td>❌</td><td>needs a controlling terminal; there isn't one</td></tr>
+    <tr><td><code>tty</code>, <code>who</code>, utmp</td><td>❌</td><td>private devpts, no resolvable name</td></tr>
+    <tr><td>Live window resize</td><td>❌</td><td>see below</td></tr>
+  </tbody>
+</table>
+
+<p>The signal forwarding is visible in the proxy's own signal mask:</p>
+
+<pre><code>$ grep SigBlk /proc/1824071/status
+SigBlk: 00000000000a4a07
+→ HUP INT QUIT USR1 USR2 TERM CONT TSTP</code></pre>
+
+<p>Eight signals, blocked so they can be drained through <code>signalfd</code>
+and forwarded to the host process. <strong><code>SIGWINCH</code> (28) is not
+among them.</strong> So when you resize the window, the kernel delivers
+<code>SIGWINCH</code> to the foreground process group of the PTY — which is
+<code>flatpak-spawn</code> — and it is dropped on the floor. Anything already
+running (<code>vim</code>, <code>less</code>, <code>htop</code>) never learns
+the terminal changed size. Newly started programs are fine, because they read
+the size directly with <code>TIOCGWINSZ</code>. That is exactly why the
+misbehaviour feels random in daily use.</p>
+
+<h2>The obvious fix, and why it fails</h2>
+
+<p>An Alacritty maintainer's passing suggestion was to wrap the shell in
+<code>script(1)</code>, which allocates a fresh PTY and relays between the two.
+Right shape, wrong outcome, twice over:</p>
+
+<ul>
+  <li><strong>It isn't there.</strong> Fedora split <code>script</code> out of
+  <code>util-linux-core</code>; <code>/usr/bin/script</code> does not exist on a
+  default install. Depending on a host binary isn't safe in a package strangers
+  install.</li>
+  <li><strong>It would claim the wrong terminal anyway.</strong>
+  <code>script</code> does <code>setsid()</code> + <code>TIOCSCTTY</code> in its
+  child — that is its entire purpose. Run it inside the sandbox and its child is
+  <code>flatpak-spawn</code>, so the proxy ends up owning the new PTY too.
+  Identical failure, one layer down.</li>
+</ul>
+
+<p>It would only help if it ran <em>on the host</em>, allocating the PTY there.
+Which is precisely what Ptyxis does, and why it needs an entire second binary to
+do it: <code>ptyxis-agent</code> runs on the host, creates PTYs there, and
+passes the master descriptor back into the sandbox over a socket
+(<code>--forward-fd=3</code>, visible in any process list). Ownership never
+crosses the boundary, so there is no conflict to resolve. Alacritty has no agent
+and no way to accept a foreign PTY master, so that route is closed.</p>
+
+<h2>The fix: stop claiming the terminal</h2>
+
+<p>The answer came from an experiment that was supposed to fail. Inside the
+sandbox, open a PTY from Python, deliberately <strong>do not</strong> claim it,
+and hand the slave to a host process through the portal:</p>
+
+<pre><code>master, slave = pty.openpty()          # no setsid(), no TIOCSCTTY
+subprocess.Popen(["flatpak-spawn", "--host", "bash", "-c", probe],
+                 stdin=slave, stdout=slave, stderr=slave)</code></pre>
+
+<p>What came back from the host side:</p>
+
+<pre><code>tty_nr     : 34816       ← nonzero. It HAS a controlling terminal.
+/dev/tty   : openable
+sid/pid    : 1834902/1834902</code></pre>
+
+<p>A bare <code>awk</code> exec'd through the portal reports the same, which
+locates the mechanism exactly: <strong>the portal's own child setup already
+makes the host process a session leader and gives it the terminal</strong> —
+automatically, with no cooperation from the app. It works every single time the
+terminal is free.</p>
+
+<div class="key">
+<p>So the fix is <strong>subtraction, not addition</strong>. Nothing needs to be
+built to acquire the terminal. Something just needs to stop stealing it first.</p>
+</div>
+
+<p>Which makes the whole fix a small relay that sits between Alacritty and
+<code>flatpak-spawn</code> and opens a second PTY it never claims:</p>
+
+<pre><code>alacritty ─(outer PTY, claimed on the relay — unavoidable)─ relay
+                                                             │
+                                     (inner PTY, left unclaimed)
+                                                             │
+                              flatpak-spawn --host ──▶ portal ──▶ bash -l
+                                                        claims it ✓</code></pre>
+
+<p>Alacritty claims the outer PTY on the relay, which is fine — the relay has no
+use for job control. The inner PTY is passed along untouched, so the portal
+gives it to the shell, where it belongs. Two more things fall out of the
+sandwich:</p>
+
+<ul>
+  <li>The outer terminal goes into <strong>raw mode</strong>, so control
+  characters travel as bytes instead of being interpreted twice. <kbd>Ctrl+C</kbd>
+  and <kbd>Ctrl+Z</kbd> are handled by the inner line discipline — the one the
+  host shell's jobs are actually attached to.</li>
+  <li>The relay <em>is</em> the foreground process group of the outer PTY, so it
+  <strong>does</strong> receive <code>SIGWINCH</code>. It copies the new size
+  onto the inner PTY. Live resize works — better than it did before.</li>
+</ul>
+
+<p><code>python3</code> ships in the freedesktop Platform runtime, so this is
+about sixty lines inside the app with no host dependency at all. It is
+<code>script(1)</code> minus the one thing <code>script</code> insists on
+doing.</p>
+
+<h3>And <code>--device=all</code> fixes <code>ttyname()</code></h3>
+
+<p>Adding <code>--device=all</code> to <code>finish-args</code> makes bwrap
+bind-mount the host's <code>/dev</code> rather than building a private one. The
+sandbox then reports devpts <code>0:28</code> — the same instance as the host —
+and the PTY becomes a real, nameable device:</p>
+
+<pre><code>tty()      : /dev/pts/15
+tty_nr     : 34831</code></pre>
+
+<p>The permission looks alarming and deserves to be stated plainly, but it
+grants nothing new <em>here</em>: the app already holds
+<code>--talk-name=org.freedesktop.Flatpak</code>, which is arbitrary command
+execution on the host. Full <code>/dev</code> is strictly less than that. In a
+package that did <em>not</em> already have host execution, this would be a real
+escalation and you should not copy it blindly.</p>
+
+<h2>Results</h2>
+
+<table>
+  <thead><tr><th>Arrangement</th><th>Controlling terminal</th><th><code>tty</code></th><th>Job control</th><th>Live resize</th></tr></thead>
+  <tbody>
+    <tr><td>Alacritty native, no sandbox</td><td>yes</td><td>✅</td><td>✅</td><td>✅</td></tr>
+    <tr><td>Flatpak + <code>flatpak-spawn --host bash -l</code></td><td><strong>no</strong></td><td>❌</td><td>❌</td><td>❌</td></tr>
+    <tr><td>Flatpak + unclaimed-PTY relay</td><td><strong>yes</strong></td><td>❌</td><td>✅</td><td>✅</td></tr>
+    <tr><td>Flatpak + relay + <code>--device=all</code></td><td><strong>yes</strong></td><td>✅</td><td>✅</td><td>✅</td></tr>
+  </tbody>
+</table>
+
+<h2>See it on your own machine</h2>
+
+<pre><code># 1. Does the host-side shell have a controlling terminal?
+#    Field 7 of /proc/&lt;pid&gt;/stat is tty_nr. 0 means none.
+pgrep -x bash | while read p; do
+  echo "$p tty_nr=$(awk '{print $7}' /proc/$p/stat) $(tr '\0' ' ' &lt;/proc/$p/cmdline)"
+done
+
+# 2. Who is holding the terminal instead? Look for Ss+ on a pts.
+ps -eo pid,ppid,tty,stat,args | grep flatpak-spawn
+
+# 3. Is the sandbox's devpts a separate instance?
+grep devpts /proc/self/mountinfo
+flatpak run --command=sh &lt;app-id&gt; -c 'grep devpts /proc/self/mountinfo'
+
+# 4. Which signals does the proxy forward?
+grep SigBlk /proc/&lt;flatpak-spawn-pid&gt;/status</code></pre>
+
+<h2>The general lesson</h2>
+
+<p><code>flatpak-spawn --host</code> is repeated everywhere as <em>the</em>
+answer for host access from a sandbox, and for running a one-shot command it
+genuinely is. What nobody mentions is that it gives the controlling terminal to
+the proxy rather than to the process you care about — so anything that needs a
+real terminal session comes out subtly crippled while appearing to work.</p>
+
+<p>The wider point outlasts terminals: <strong>a sandbox boundary is not only a
+filesystem boundary.</strong> Sessions, process groups and controlling terminals
+are kernel-global, single-owner objects, and they do not respect the
+two-process-tree split that <code>flatpak-spawn</code> creates. Anything built
+on them has to be created on the side that will own it. That is the design
+decision Ptyxis made deliberately, and the one a config-only workaround skips
+without telling you.</p>
+
+<p>It is also a considerably sharper argument for Alacritty upstream's refusal
+to support Flatpak than the one they actually made.</p>
+
+<div class="warn">
+<strong>Unofficial and unendorsed.</strong> The Alacritty project has declined
+official Flatpak support and asked that unofficial packages not be published.
+This build exists independently under Alacritty's Apache-2.0 licence as a
+teaching example. Report packaging bugs to
+<a href="https://github.com/superuser-miguel/alacritty-flatpak/issues">this repo</a>,
+never to the Alacritty project.
+</div>
+
+<footer>
+  <a href="./">← Back to the project</a> ·
+  <a href="https://github.com/superuser-miguel/alacritty-flatpak/blob/main/Findings.md">Findings.md</a> ·
+  <a href="https://github.com/superuser-miguel/alacritty-flatpak/blob/main/flatpak/alacritty-host-shell">the relay source</a>
+</footer>
+
+</div>
+</body>
+</html>

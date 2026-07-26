@@ -55,7 +55,7 @@
   <h1>Why terminals resist sandboxing</h1>
   <p class="tag">A write-up on the Flatpak terminal problem — with a working
   reference implementation of the escape hatch, packaging Alacritty.</p>
-  <a class="btn" href="https://github.com/superuser-miguel/alacritty-flatpak/blob/main/Findings.md">Read the write-up</a>
+  <a class="btn" href="./pty-job-control.html">Read the write-up</a>
   <a class="btn alt" href="https://github.com/superuser-miguel/alacritty-flatpak">Source</a>
 </header>
 
@@ -95,9 +95,23 @@ the shell session runs on the host. Verified by comparing mount namespaces:</p>
 </table>
 
 <p>It is the same trick Ptyxis uses in production, via its separately
-host-spawned <code>ptyxis-agent</code>. The full write-up — including why GNOME
+host-spawned <code>ptyxis-agent</code>. The background — including why GNOME
 Terminal has no Flatpak at all — is in
 <a href="https://github.com/superuser-miguel/alacritty-flatpak/blob/main/Findings.md">Findings.md</a>.</p>
+
+<h2>The part everyone gets wrong</h2>
+<p>Getting the shell onto the host is the easy half. The half nobody mentions is
+that <code>flatpak-spawn</code> hands the <em>controlling terminal</em> to the
+proxy rather than to your shell — so job control silently dies:
+<kbd>Ctrl+Z</kbd>, <code>fg</code> and <code>bg</code> stop working, and
+<code>tty</code> can't name your terminal. This build fixes it with a PTY relay
+that deliberately refuses to claim the terminal, letting the portal give it to
+the shell instead.</p>
+<p><strong><a href="./pty-job-control.html">The sandboxed terminal that lost its
+job control</a></strong> — the full debugging write-up: what a controlling
+terminal is, why <code>TIOCSCTTY</code>'s one-shot land grab breaks across the
+sandbox boundary, why <code>script(1)</code> can't help, and the sixty-line
+fix.</p>
 
 <h2>Configuration</h2>
 <p>The shell override ships inside the app and is passed by the desktop entry.

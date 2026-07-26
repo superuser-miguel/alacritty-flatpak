@@ -12,3 +12,6 @@ flatpak/repo-release/
 
 # Local Claude Code settings
 .claude/settings.local.json
+
+# Python bytecode from syntax-checking the relay
+__pycache__/

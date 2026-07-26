@@ -178,3 +178,63 @@ project rather than GNOME Terminal simply growing Flatpak support.
   If you want to add your own settings (font, colors, keybindings, etc.) for the flatpak build specifically, this is the file to edit — it'll persist across rebuilds since it lives outside
   the Flatpak itself.```
 
+---
+
+# Addendum (2026-07-26): the `flatpak-spawn` trick is not enough
+
+Everything above stands — the shell really does run on the host, verified by
+mount namespace. But "runs on the host" and "is a working terminal session" turn
+out to be different claims, and the original verification only established the
+first.
+
+The symptom, present since the very first build and missed for months because
+the terminal *looks* fine:
+
+```
+bash: cannot set terminal process group (-1): Inappropriate ioctl for device
+bash: no job control in this shell
+tty: ttyname error: No such device
+```
+
+**Cause.** `TIOCSCTTY` is an exclusive, one-shot claim — the first session to
+grab a PTY owns it permanently. Alacritty does the textbook thing (`setsid()` +
+`TIOCSCTTY` in its child, then `exec`), but under Flatpak that child is
+`flatpak-spawn`, a proxy that only makes a D-Bus call. The proxy performs the
+land grab. The real shell is spawned separately by the portal, in a different
+process tree, and by then the terminal is taken — so it starts with no
+controlling terminal at all (`tty_nr` = 0 in `/proc/<pid>/stat`) and disables
+job control. `Ctrl+Z`, `fg`, `bg` and `jobs` are all gone. `Ctrl+C` survives
+only because `flatpak-spawn` separately forwards eight signals over the portal —
+`SIGWINCH` is not one of them, so live window resize never reaches anything
+running in the shell either.
+
+The `ttyname()` failure is a second, unrelated bug: the sandbox gets a private
+devpts instance (`0:158` versus the host's `0:28`), so the PTY has no device
+node the host can name.
+
+**Fix.** Subtraction, not addition. The portal's own child setup already gives
+the host process a controlling terminal automatically — but only if the terminal
+is free. So the app now ships `flatpak/alacritty-host-shell`, a ~60-line PTY
+relay that opens a second PTY and deliberately never claims it, puts the outer
+terminal in raw mode, runs `flatpak-spawn --host bash -l` on the inner slave, and
+forwards `SIGWINCH` (which it receives, being the foreground process group of the
+outer PTY). `python3` is in the freedesktop Platform runtime, so there is no host
+dependency. Adding `--device=all` to `finish-args` puts the sandbox on the host's
+devpts, which restores `tty`, `who` and utmp; it grants nothing new given the app
+already holds `--talk-name=org.freedesktop.Flatpak`.
+
+`script(1)` — the workaround an Alacritty maintainer suggested in passing, quoted
+earlier in this document — cannot do the job: Fedora no longer installs it, and
+it claims the controlling terminal in its own child regardless, which reproduces
+the bug one layer down.
+
+The full debugging write-up, with measurements and reproduction steps, is at
+<https://superuser-miguel.github.io/alacritty-flatpak/pty-job-control.html>.
+
+This also sharpens the upstream argument quoted at the top of this document.
+kchibisov's objection was that a sandboxed terminal either traps the shell or
+punches a hole to the host. The truer statement is narrower and harder: sessions,
+process groups and controlling terminals are kernel-global, single-owner objects,
+and they do not survive being split across two process trees. That is why Ptyxis
+needed a whole host-side agent rather than a config option.
+
