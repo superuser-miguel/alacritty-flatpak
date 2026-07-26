@@ -52,12 +52,20 @@
 <div class="wrap">
 
 <header>
-  <h1>Alacritty — unofficial Flatpak</h1>
-  <p class="tag">A sandboxed build of the GPU-accelerated terminal, with a shell
-  that actually runs on your host.</p>
-  <a class="btn" href="https://superuser-miguel.github.io/alacritty-flatpak-repo/alacritty.flatpakref">Install (auto-updating)</a>
+  <h1>Why terminals resist sandboxing</h1>
+  <p class="tag">A write-up on the Flatpak terminal problem — with a working
+  reference implementation of the escape hatch, packaging Alacritty.</p>
+  <a class="btn" href="https://github.com/superuser-miguel/alacritty-flatpak/blob/main/Findings.md">Read the write-up</a>
   <a class="btn alt" href="https://github.com/superuser-miguel/alacritty-flatpak">Source</a>
 </header>
+
+<p>This is primarily an <strong>educational</strong> project. The question it
+answers is a real one: why is there no Flatpak of Alacritty, and what would it
+take? The answer turns out to be architectural rather than a packaging
+oversight — the same problem <a href="https://gitlab.gnome.org/chergert/ptyxis">Ptyxis</a>
+solves with a host-spawned agent, and that GNOME Terminal's design cannot solve
+at all. The manifest here is the reference implementation: something to read,
+build, and check the claims against.</p>
 
 <p class="warn"><strong>Unofficial and unendorsed.</strong> The Alacritty project
 has declined official Flatpak support and asked that unofficial packages not be
@@ -66,14 +74,6 @@ Report packaging bugs to
 <a href="https://github.com/superuser-miguel/alacritty-flatpak/issues">this repo</a>,
 never to the Alacritty project. For a supported Flatpak terminal, use
 <a href="https://flathub.org/apps/app.devsuite.Ptyxis">Ptyxis</a>.</p>
-
-<h2>Install</h2>
-<p>The hosted repo is a signed remote, so <code>flatpak update</code> tracks it:</p>
-<pre><code>flatpak install --user https://superuser-miguel.github.io/alacritty-flatpak-repo/alacritty.flatpakref
-flatpak run io.github.superuser_miguel.Alacritty</code></pre>
-<p>A single-file <code>.flatpak</code> bundle is also on
-<a href="https://github.com/superuser-miguel/alacritty-flatpak/releases/latest">Releases</a>,
-but a bundle is frozen and has no update path.</p>
 
 <h2>Why a Flatpak terminal is hard</h2>
 <p>A sandboxed terminal either runs your shell <em>inside</em> the sandbox —
@@ -104,6 +104,19 @@ Terminal has no Flatpak at all — is in
 It imports your own <code>~/.config/alacritty/alacritty.toml</code> if present —
 your fonts, colours and keybindings apply, while the shell override stays in
 force.</p>
+
+<h2>Try it</h2>
+<p>Building it yourself is the honest way to verify any of the above; the
+manifest is in the repo. If you just want the artifact to poke at, a
+<code>.flatpak</code> bundle is on
+<a href="https://github.com/superuser-miguel/alacritty-flatpak/releases/latest">Releases</a>,
+and a signed repo exists if you would rather <code>flatpak update</code> track it:</p>
+<pre><code>flatpak install --user ./Alacritty.flatpak
+# or
+flatpak install --user https://superuser-miguel.github.io/alacritty-flatpak-repo/alacritty.flatpakref</code></pre>
+<p>To confirm the host-shell claim on your own machine, launch it and compare
+<code>readlink /proc/&lt;pid&gt;/ns/mnt</code> for the <code>alacritty</code>
+process against the <code>bash -l</code> it spawns.</p>
 
 <footer>
   Alacritty © the Alacritty project, Apache-2.0. Packaging by

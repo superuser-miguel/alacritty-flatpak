@@ -1,10 +1,19 @@
 <h1 align="center">Alacritty — unofficial Flatpak</h1>
 
 <p align="center">
-Flatpak packaging of <a href="https://github.com/alacritty/alacritty">Alacritty</a>,
-with a working host-shell escape — plus notes on why terminal emulators are
-awkward to sandbox at all.
+A write-up on why terminal emulators are hard to sandbox — with a working
+reference implementation.
 </p>
+
+This repo is primarily **educational**. The question it answers is a real one:
+*why is there no Flatpak of Alacritty, and what would it take?* The answer turns
+out to be architectural rather than a packaging oversight, and it is the same
+problem [Ptyxis](https://gitlab.gnome.org/chergert/ptyxis) solves with a
+host-spawned agent and that GNOME Terminal's design cannot solve at all.
+
+[**`Findings.md`**](Findings.md) is the write-up and the point of the repo. The
+Flatpak manifest alongside it is the reference implementation — something you
+can read, build, and verify the claims against, rather than a product.
 
 > [!WARNING]
 > **Unofficial and unendorsed.** The Alacritty project has declined official
@@ -16,30 +25,6 @@ awkward to sandbox at all.
 > built and maintained independently under Alacritty's Apache-2.0 licence.
 > **Report packaging bugs here, never to the Alacritty project.** If you want a
 > supported Flatpak terminal, use [Ptyxis](https://flathub.org/apps/app.devsuite.Ptyxis).
-
-## Install
-
-**Recommended — hosted repo, gets `flatpak update`:**
-
-```sh
-flatpak install --user https://superuser-miguel.github.io/alacritty-flatpak-repo/alacritty.flatpakref
-flatpak run io.github.superuser_miguel.Alacritty
-```
-
-This subscribes you to a signed remote, so future releases arrive with
-`flatpak update`.
-
-**Alternative — single-file bundle** from
-[Releases](https://github.com/superuser-miguel/alacritty-flatpak/releases/latest).
-A bundle is a frozen file with **no update path** — you would redownload and
-reinstall to upgrade:
-
-```sh
-flatpak install --user ./Alacritty.flatpak
-```
-
-Both need the Flathub remote configured for the `org.freedesktop.Platform//25.08`
-runtime.
 
 ## The sandbox problem
 
@@ -77,6 +62,28 @@ while the shell override stays in force. A missing import is logged and ignored.
 
 Launching `flatpak run io.github.superuser_miguel.Alacritty` **without**
 `--config-file` skips all of that and drops you in a sandbox-trapped shell.
+
+## Try it
+
+Building it yourself (below) is the honest way to verify any of the above. If
+you just want the artifact to poke at, a `.flatpak` bundle is on
+[Releases](https://github.com/superuser-miguel/alacritty-flatpak/releases/latest):
+
+```sh
+flatpak install --user ./Alacritty.flatpak
+flatpak run io.github.superuser_miguel.Alacritty
+```
+
+There is also a signed repo, if you would rather `flatpak update` track it:
+
+```sh
+flatpak install --user https://superuser-miguel.github.io/alacritty-flatpak-repo/alacritty.flatpakref
+```
+
+Both need the Flathub remote configured for the `org.freedesktop.Platform//25.08`
+runtime. To confirm the host-shell claim on your own machine, launch it and
+compare `readlink /proc/<pid>/ns/mnt` for the `alacritty` process against the
+`bash -l` it spawns.
 
 ## Build from source
 
