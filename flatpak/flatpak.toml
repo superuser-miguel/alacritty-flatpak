@@ -1,0 +1,22 @@
+# Default configuration shipped INSIDE the Alacritty Flatpak.
+#
+# Installed to /app/share/alacritty/flatpak.toml and passed via --config-file
+# by the desktop entry. It must not reference any absolute home directory —
+# this file ships to whatever machine installs the app.
+#
+# What it does: hands the login shell off to `flatpak-spawn --host`, so the
+# shell runs on the real host instead of inside the Flatpak sandbox. Without
+# this the terminal opens into the runtime's filesystem and is near-useless.
+#
+# Your own settings still apply: the import below pulls in the standard
+# per-user config if it exists. Alacritty merges imports with the importing
+# file taking precedence, so fonts/colours/keybindings from your file are
+# honoured while the shell override here stays in force. A missing import is
+# logged and ignored, so it is fine not to have one.
+
+[general]
+import = ["~/.config/alacritty/alacritty.toml"]
+
+[terminal.shell]
+program = "flatpak-spawn"
+args = ["--host", "bash", "-l"]

@@ -1,8 +1,12 @@
 # flatpak-builder output — all regenerable from the manifest
 flatpak/.flatpak-builder/
 flatpak/build/
+flatpak/build-*/
 flatpak/repo/
-flatpak/*.flatpak
+flatpak/repo-release/
+
+# Release artifacts (published to GitHub Releases, not committed)
+*.flatpak
 
 # Local Claude Code settings
 .claude/settings.local.json

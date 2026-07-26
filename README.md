@@ -1,42 +1,84 @@
-# Alacritty — personal Flatpak build
+<h1 align="center">Alacritty — unofficial Flatpak</h1>
 
-A local, unpublished Flatpak packaging of [Alacritty](https://github.com/alacritty/alacritty)
-for a single machine, plus notes on why terminal emulators are awkward to
-sandbox at all.
+<p align="center">
+Flatpak packaging of <a href="https://github.com/alacritty/alacritty">Alacritty</a>,
+with a working host-shell escape — plus notes on why terminal emulators are
+awkward to sandbox at all.
+</p>
 
-> **Not for distribution.** Alacritty upstream has declined official Flatpak
-> support and asked that unofficial packages not be published either
-> (alacritty/alacritty#8770, #6474, #5828, #2571). This manifest exists for
-> personal use only and is not submitted to Flathub or any other repo.
+> [!WARNING]
+> **Unofficial and unendorsed.** The Alacritty project has declined official
+> Flatpak support and asked that unofficial packages not be published
+> ([#8770](https://github.com/alacritty/alacritty/issues/8770),
+> [#6474](https://github.com/alacritty/alacritty/issues/6474),
+> [#5828](https://github.com/alacritty/alacritty/issues/5828),
+> [#2571](https://github.com/alacritty/alacritty/issues/2571)). This package is
+> built and maintained independently under Alacritty's Apache-2.0 licence.
+> **Report packaging bugs here, never to the Alacritty project.** If you want a
+> supported Flatpak terminal, use [Ptyxis](https://flathub.org/apps/app.devsuite.Ptyxis).
 
-## What's here
+## Install
 
-| Path | |
-|---|---|
-| `flatpak/io.github.superuser_miguel.Alacritty.yml` | flatpak-builder manifest (builds v0.17.0 from source) |
-| `flatpak/io.github.superuser_miguel.Alacritty.desktop` | Desktop entry, points at the Flatpak-only config |
-| `Findings.md` | Write-up: the sandbox problem, and how Ptyxis and GNOME Terminal handle it |
+**Recommended — hosted repo, gets `flatpak update`:**
 
-Build artifacts (`.flatpak-builder/`, `build/`, `repo/`) are ignored — they
-regenerate from the manifest.
+```sh
+flatpak install --user https://superuser-miguel.github.io/alacritty-flatpak-repo/alacritty.flatpakref
+flatpak run io.github.superuser_miguel.Alacritty
+```
 
-## The sandbox problem, briefly
+This subscribes you to a signed remote, so future releases arrive with
+`flatpak update`.
 
-A Flatpak'd terminal either runs your shell *inside* the sandbox — trapping
-you in the runtime's filesystem rather than your real system — or punches a
-hole to the host to spawn processes there.
+**Alternative — single-file bundle** from
+[Releases](https://github.com/superuser-miguel/alacritty-flatpak/releases/latest).
+A bundle is a frozen file with **no update path** — you would redownload and
+reinstall to upgrade:
+
+```sh
+flatpak install --user ./Alacritty.flatpak
+```
+
+Both need the Flathub remote configured for the `org.freedesktop.Platform//25.08`
+runtime.
+
+## The sandbox problem
+
+A Flatpak'd terminal either runs your shell *inside* the sandbox — trapping you
+in the runtime's filesystem rather than your real system — or punches a hole to
+the host to spawn processes there. Upstream's objection is that both outcomes
+are bad, so terminals are a poor fit for the model on principle.
 
 This build takes the second path, using the mechanism an Alacritty maintainer
 suggested in passing: override `terminal.shell` to launch
-`flatpak-spawn --host bash -l`. The GUI/GPU process stays sandboxed; the shell
-session runs on the host. Verified by comparing `/proc/<pid>/ns/mnt` of the
-spawned shell against a host shell — they match, while Alacritty's own process
-sits in a distinct bwrap namespace.
+`flatpak-spawn --host bash -l`. The GPU and UI process stay sandboxed; the shell
+session runs on the host.
 
-This is the same trick Ptyxis uses in production, via its separate
-host-spawned `ptyxis-agent`. See `Findings.md` for the full comparison.
+Verified rather than assumed — comparing `/proc/<pid>/ns/mnt` across the three
+processes:
 
-## Building
+| process | mount namespace |
+|---|---|
+| a host shell | `mnt:[4026531832]` |
+| alacritty (sandboxed) | `mnt:[4026533599]` |
+| the spawned `bash -l` | `mnt:[4026531832]` — matches the host |
+
+This is the same trick [Ptyxis](https://gitlab.gnome.org/chergert/ptyxis) uses in
+production, via its separately host-spawned `ptyxis-agent`. See
+[`Findings.md`](Findings.md) for the full write-up and a comparison with GNOME
+Terminal, which has no Flatpak at all.
+
+## Configuration
+
+The shell override ships *inside* the app at `/app/share/alacritty/flatpak.toml`,
+and the desktop entry passes it with `--config-file`. That file imports your own
+`~/.config/alacritty/alacritty.toml` if you have one; Alacritty merges imports
+with the importing file winning, so your fonts, colours and keybindings apply
+while the shell override stays in force. A missing import is logged and ignored.
+
+Launching `flatpak run io.github.superuser_miguel.Alacritty` **without**
+`--config-file` skips all of that and drops you in a sandbox-trapped shell.
+
+## Build from source
 
 ```sh
 cd flatpak
@@ -44,14 +86,14 @@ flatpak-builder --user --install --force-clean build io.github.superuser_miguel.
 ```
 
 Needs the `org.freedesktop.Sdk.Extension.rust-stable` SDK extension (runtime
-`25.08`). The manifest builds with `--share=network` so cargo can fetch
-crates.io dependencies — fine for a personal build, not acceptable for a
-Flathub submission, which would vendor them instead.
+`25.08`). Builds Alacritty v0.17.0 from a pinned upstream tag and commit. The
+manifest builds with `--share=network` so cargo can fetch crates.io
+dependencies; a Flathub-grade package would vendor them instead, which this
+deliberately does not attempt to be.
 
-## Shell config
+Publishing a release (bundle + signed repo) is `build-aux/publish-repo.sh`.
 
-The desktop entry passes `--config-file ~/.config/alacritty/flatpak.toml`
-explicitly. That file lives outside this repo (and outside the Flatpak, so it
-survives rebuilds) and carries the `terminal.shell` override described above.
-Launching via `flatpak run io.github.superuser_miguel.Alacritty` directly
-skips it and lands you in a sandbox-trapped shell.
+## Licence
+
+Alacritty is Apache-2.0, © the Alacritty project. The packaging files in this
+repo are offered under the same licence.

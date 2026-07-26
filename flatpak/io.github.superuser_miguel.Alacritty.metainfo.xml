@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Unofficial Flatpak packaging of Alacritty. Upstream neither publishes nor
+  endorses this build; see the project README. Alacritty is Apache-2.0.
+-->
+<component type="desktop-application">
+  <id>io.github.superuser_miguel.Alacritty</id>
+
+  <name>Alacritty</name>
+  <summary>A fast, GPU-accelerated terminal emulator</summary>
+
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>Apache-2.0</project_license>
+
+  <developer id="io.github.alacritty">
+    <name>The Alacritty Project</name>
+  </developer>
+
+  <description>
+    <p>
+      Alacritty is a fast, cross-platform, OpenGL terminal emulator. It focuses
+      on simplicity and performance, deferring features like tabs and splits to
+      a window manager or terminal multiplexer.
+    </p>
+    <p>
+      This is an unofficial Flatpak package, not published or endorsed by the
+      Alacritty project. Because a sandboxed terminal would otherwise trap you
+      inside the Flatpak runtime's filesystem, this build ships a configuration
+      that hands the login shell off to the host via flatpak-spawn. The GPU and
+      UI process stay sandboxed; the shell session runs on the host.
+    </p>
+  </description>
+
+  <launchable type="desktop-id">io.github.superuser_miguel.Alacritty.desktop</launchable>
+
+  <url type="homepage">https://alacritty.org</url>
+  <url type="bugtracker">https://github.com/superuser-miguel/alacritty-flatpak/issues</url>
+  <url type="vcs-browser">https://github.com/superuser-miguel/alacritty-flatpak</url>
+
+  <categories>
+    <category>System</category>
+    <category>TerminalEmulator</category>
+  </categories>
+
+  <content_rating type="oars-1.1"/>
+
+  <releases>
+    <release version="0.17.0" date="2026-07-25">
+      <description>
+        <p>First packaged release. Builds Alacritty v0.17.0 from source.</p>
+      </description>
+    </release>
+  </releases>
+</component>

@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alacritty — unofficial Flatpak</title>
+<meta name="description" content="Flatpak packaging of Alacritty with a working host-shell escape, plus notes on why terminals are hard to sandbox.">
+<style>
+  :root{
+    --bg:#fbfbfd; --fg:#1c1c1f; --muted:#5b5b66; --line:#e4e4ea;
+    --card:#fff; --accent:#c2410c; --warnbg:#fffbeb; --warnline:#d97706;
+    --code:#f4f4f7;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#0f0f12; --fg:#e9e9ee; --muted:#a0a0ad; --line:#26262e;
+      --card:#17171c; --accent:#fb923c; --warnbg:#2a2010; --warnline:#d97706;
+      --code:#1c1c22;
+    }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+       font-family:system-ui,-apple-system,"Segoe UI",sans-serif;line-height:1.65}
+  .wrap{max-width:46rem;margin:0 auto;padding:0 1.25rem}
+  header{padding:4.5rem 0 2.5rem;text-align:center}
+  h1{font-size:clamp(2rem,6vw,2.9rem);margin:0 0 .4rem;letter-spacing:-.02em}
+  .tag{color:var(--muted);font-size:1.08rem;margin:0 auto;max-width:34rem}
+  .btn{display:inline-block;margin:1.8rem .4rem 0;padding:.7rem 1.5rem;
+       background:var(--accent);color:#fff;text-decoration:none;border-radius:8px;
+       font-weight:600}
+  .btn.alt{background:transparent;color:var(--fg);border:1px solid var(--line)}
+  .warn{border-left:4px solid var(--warnline);background:var(--warnbg);
+        padding:1rem 1.2rem;border-radius:6px;margin:2.5rem 0}
+  .warn strong{color:var(--warnline)}
+  h2{margin:3rem 0 .8rem;font-size:1.35rem;letter-spacing:-.01em}
+  code{background:var(--code);padding:.15em .4em;border-radius:4px;font-size:.9em}
+  pre{background:var(--code);padding:1rem;border-radius:8px;overflow-x:auto;
+      border:1px solid var(--line)}
+  pre code{background:none;padding:0}
+  table{width:100%;border-collapse:collapse;margin:1.2rem 0;font-size:.94rem;
+        display:block;overflow-x:auto}
+  th,td{text-align:left;padding:.6rem .7rem;border-bottom:1px solid var(--line);
+        white-space:nowrap}
+  th{font-weight:600}
+  td:last-child{font-family:ui-monospace,monospace;font-size:.88em}
+  a{color:var(--accent)}
+  footer{margin:4rem 0 3rem;padding-top:1.5rem;border-top:1px solid var(--line);
+         color:var(--muted);font-size:.9rem;text-align:center}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>Alacritty — unofficial Flatpak</h1>
+  <p class="tag">A sandboxed build of the GPU-accelerated terminal, with a shell
+  that actually runs on your host.</p>
+  <a class="btn" href="https://superuser-miguel.github.io/alacritty-flatpak-repo/alacritty.flatpakref">Install (auto-updating)</a>
+  <a class="btn alt" href="https://github.com/superuser-miguel/alacritty-flatpak">Source</a>
+</header>
+
+<p class="warn"><strong>Unofficial and unendorsed.</strong> The Alacritty project
+has declined official Flatpak support and asked that unofficial packages not be
+published. This is built independently under Alacritty's Apache-2.0 licence.
+Report packaging bugs to
+<a href="https://github.com/superuser-miguel/alacritty-flatpak/issues">this repo</a>,
+never to the Alacritty project. For a supported Flatpak terminal, use
+<a href="https://flathub.org/apps/app.devsuite.Ptyxis">Ptyxis</a>.</p>
+
+<h2>Install</h2>
+<p>The hosted repo is a signed remote, so <code>flatpak update</code> tracks it:</p>
+<pre><code>flatpak install --user https://superuser-miguel.github.io/alacritty-flatpak-repo/alacritty.flatpakref
+flatpak run io.github.superuser_miguel.Alacritty</code></pre>
+<p>A single-file <code>.flatpak</code> bundle is also on
+<a href="https://github.com/superuser-miguel/alacritty-flatpak/releases/latest">Releases</a>,
+but a bundle is frozen and has no update path.</p>
+
+<h2>Why a Flatpak terminal is hard</h2>
+<p>A sandboxed terminal either runs your shell <em>inside</em> the sandbox —
+trapping you in the runtime's filesystem instead of your real system — or
+punches a hole to the host to spawn processes there. Upstream's position is that
+both outcomes are bad, so terminals fit Flatpak's model poorly on principle.</p>
+<p>This build takes the second path, using the mechanism an Alacritty maintainer
+suggested in passing: override <code>terminal.shell</code> to launch
+<code>flatpak-spawn --host bash -l</code>. The GPU and UI process stay sandboxed;
+the shell session runs on the host. Verified by comparing mount namespaces:</p>
+
+<table>
+  <thead><tr><th>process</th><th>mount namespace</th></tr></thead>
+  <tbody>
+    <tr><td>a host shell</td><td>mnt:[4026531832]</td></tr>
+    <tr><td>alacritty (sandboxed)</td><td>mnt:[4026533599]</td></tr>
+    <tr><td>the spawned <code>bash -l</code></td><td>mnt:[4026531832] — matches host</td></tr>
+  </tbody>
+</table>
+
+<p>It is the same trick Ptyxis uses in production, via its separately
+host-spawned <code>ptyxis-agent</code>. The full write-up — including why GNOME
+Terminal has no Flatpak at all — is in
+<a href="https://github.com/superuser-miguel/alacritty-flatpak/blob/main/Findings.md">Findings.md</a>.</p>
+
+<h2>Configuration</h2>
+<p>The shell override ships inside the app and is passed by the desktop entry.
+It imports your own <code>~/.config/alacritty/alacritty.toml</code> if present —
+your fonts, colours and keybindings apply, while the shell override stays in
+force.</p>
+
+<footer>
+  Alacritty © the Alacritty project, Apache-2.0. Packaging by
+  <a href="https://github.com/superuser-miguel">superuser-miguel</a>.
+</footer>
+
+</div>
+</body>
+</html>

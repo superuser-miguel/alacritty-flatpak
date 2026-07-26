@@ -1,18 +1,18 @@
 [Desktop Entry]
 Type=Application
 TryExec=alacritty
-Exec=alacritty --config-file /home/definitive_group/.config/alacritty/flatpak.toml
+Exec=alacritty --config-file /app/share/alacritty/flatpak.toml
 Icon=io.github.superuser_miguel.Alacritty
 Terminal=false
 Categories=System;TerminalEmulator;
 
 Name=Alacritty
 GenericName=Terminal
-Comment=A fast, cross-platform, OpenGL terminal emulator (personal flatpak build)
+Comment=A fast, cross-platform, OpenGL terminal emulator (unofficial flatpak build)
 StartupNotify=true
 StartupWMClass=Alacritty
 Actions=New;
 
 [Desktop Action New]
 Name=New Terminal
-Exec=alacritty --config-file /home/definitive_group/.config/alacritty/flatpak.toml
+Exec=alacritty --config-file /app/share/alacritty/flatpak.toml

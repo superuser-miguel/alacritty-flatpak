@@ -6,10 +6,11 @@ sdk-extensions:
   - org.freedesktop.Sdk.Extension.rust-stable
 command: alacritty
 
-# Personal build only — never submitted to Flathub. Upstream has explicitly
-# declined official Flatpak support and asked that no one publish an
-# unofficial one either (see alacritty/alacritty#8770, #6474, #5828, #2571).
-# This manifest exists purely for local, single-machine use.
+# Unofficial build. Upstream has explicitly declined official Flatpak support
+# and is not involved in or responsible for this package (see
+# alacritty/alacritty#8770, #6474, #5828, #2571). Not submitted to Flathub.
+# Alacritty itself is Apache-2.0; this packaging is redistribution under that
+# licence, not an endorsed release.
 
 build-options:
   append-path: /usr/lib/sdk/rust-stable/bin
@@ -39,9 +40,19 @@ modules:
         /app/share/icons/hicolor/scalable/apps/io.github.superuser_miguel.Alacritty.svg
       - install -Dm644 io.github.superuser_miguel.Alacritty.desktop
         /app/share/applications/io.github.superuser_miguel.Alacritty.desktop
+      - install -Dm644 io.github.superuser_miguel.Alacritty.metainfo.xml
+        /app/share/metainfo/io.github.superuser_miguel.Alacritty.metainfo.xml
+      # The shell override that makes the sandboxed terminal usable. Shipped
+      # inside the app so it works on any machine, not just the build host.
+      - install -Dm644 flatpak.toml /app/share/alacritty/flatpak.toml
     sources:
       - type: git
         url: https://github.com/alacritty/alacritty.git
         tag: v0.17.0
+        commit: 94e7c8874e526b1e67b349d9ba30ddf81669119e
       - type: file
         path: io.github.superuser_miguel.Alacritty.desktop
+      - type: file
+        path: io.github.superuser_miguel.Alacritty.metainfo.xml
+      - type: file
+        path: flatpak.toml
