@@ -28,14 +28,18 @@ MANIFEST="flatpak/${APP_ID}.yml"
 here="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$here"
 
-work="$(mktemp -d)"
+# Must live on the same filesystem as the flatpak-builder state dir, so NOT in
+# /tmp — that is tmpfs here, which flatpak-builder rejects outright ("state dir
+# is not on the same filesystem as the target dir") and which would put the
+# whole cargo build in RAM anyway. Kept inside the project and gitignored.
+work="$(mktemp -d "$here/.publish-tmp.XXXXXX")"
 trap 'rm -rf "$work"' EXIT
 repo="$work/repo"
 build="$work/build-dir"
 
 echo ">> Building signed release into a fresh OSTree repo…"
-flatpak-builder --user --force-clean --repo="$repo" --gpg-sign="$KEYID" \
-    "$build" "$MANIFEST"
+flatpak-builder --user --force-clean --state-dir="$work/state" \
+    --repo="$repo" --gpg-sign="$KEYID" "$build" "$MANIFEST"
 
 echo ">> Generating static deltas + signing the summary…"
 flatpak build-update-repo --generate-static-deltas --prune --gpg-sign="$KEYID" "$repo"

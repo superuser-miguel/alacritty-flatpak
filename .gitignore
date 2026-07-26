@@ -1,4 +1,6 @@
 # flatpak-builder output — all regenerable from the manifest
+.flatpak-builder/
+.publish-tmp.*/
 flatpak/.flatpak-builder/
 flatpak/build/
 flatpak/build-*/
