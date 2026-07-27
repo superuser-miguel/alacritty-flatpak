@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Everything that breaks when you sandbox a terminal</title>
+<meta name="description" content="Nine things that break when a terminal emulator runs in a Flatpak, each measured, with the cause and the fix. A field guide.">
+<style>
+  :root{
+    --bg:#fbfbfd; --fg:#1c1c1f; --muted:#5b5b66; --line:#e4e4ea;
+    --accent:#c2410c; --warnbg:#fffbeb; --warnline:#d97706;
+    --code:#f4f4f7; --okbg:#f0fdf4; --okline:#16a34a;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#0f0f12; --fg:#e9e9ee; --muted:#a0a0ad; --line:#26262e;
+      --accent:#fb923c; --warnbg:#2a2010; --warnline:#d97706;
+      --code:#1c1c22; --okbg:#0f2016; --okline:#16a34a;
+    }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+       font-family:system-ui,-apple-system,"Segoe UI",sans-serif;line-height:1.65}
+  .wrap{max-width:48rem;margin:0 auto;padding:0 1.25rem}
+  header{padding:4rem 0 1.5rem}
+  .back{color:var(--muted);text-decoration:none;font-size:.9rem}
+  .back:hover{color:var(--accent)}
+  h1{font-size:clamp(1.8rem,5vw,2.6rem);margin:1.2rem 0 .5rem;letter-spacing:-.02em}
+  .tag{color:var(--muted);font-size:1.06rem;margin:0}
+  .meta{color:var(--muted);font-size:.85rem;margin-top:1.2rem;
+        padding-top:1.2rem;border-top:1px solid var(--line)}
+  h2{margin:3.2rem 0 .5rem;font-size:1.4rem;letter-spacing:-.01em;
+     padding-bottom:.4rem;border-bottom:1px solid var(--line)}
+  h3{margin:2.2rem 0 .5rem;font-size:1.06rem}
+  h3 .n{color:var(--accent);font-variant-numeric:tabular-nums;margin-right:.4rem}
+  code{background:var(--code);padding:.15em .4em;border-radius:4px;font-size:.9em}
+  pre{background:var(--code);padding:1rem;border-radius:8px;overflow-x:auto;
+      border:1px solid var(--line);font-size:.86rem;line-height:1.5}
+  pre code{background:none;padding:0;font-size:1em}
+  table{width:100%;border-collapse:collapse;margin:1.2rem 0;font-size:.92rem;
+        display:block;overflow-x:auto}
+  th,td{text-align:left;padding:.55rem .7rem;border-bottom:1px solid var(--line);
+        vertical-align:top}
+  th{font-weight:600;white-space:nowrap}
+  .sym{color:var(--muted);font-size:.94rem;margin:.2rem 0 .8rem}
+  .sym b{color:var(--fg);font-weight:600}
+  .key{border-left:4px solid var(--okline);background:var(--okbg);
+       padding:.9rem 1.1rem;border-radius:6px;margin:1.5rem 0}
+  .warn{border-left:4px solid var(--warnline);background:var(--warnbg);
+        padding:1rem 1.2rem;border-radius:6px;margin:2rem 0}
+  a{color:var(--accent)}
+  footer{margin:4rem 0 3rem;padding-top:1.5rem;border-top:1px solid var(--line);
+         color:var(--muted);font-size:.9rem}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <a class="back" href="./">← Alacritty, unofficial Flatpak</a>
+  <h1>Everything that breaks when you sandbox a terminal</h1>
+  <p class="tag">Nine of them. Each one measured, with what it looks like, why
+  it happens, and what fixes it.</p>
+  <p class="meta">July 2026. Companion to
+  <a href="./pty-job-control.html">the debugging write-up</a>, which tells the
+  story of finding the first one. This page is the catalogue.</p>
+</header>
+
+<p>The received wisdom for getting host access out of a Flatpak is
+<code>flatpak-spawn --host</code>, and for a terminal emulator that means
+overriding the shell command. It works: the shell really does run on your real
+system. It is also, on its own, nowhere near enough — and the gap is invisible,
+because the terminal <em>looks</em> fine.</p>
+
+<p>What follows is everything that turned out to be broken, found by measuring
+rather than guessing. The useful structure isn't the order they were found in;
+it is <strong>where the state lives</strong>, because that determines how each
+one fails and whether it can be fixed at all.</p>
+
+<table>
+  <thead><tr><th>#</th><th>What breaks</th><th>State lives in</th><th>Fix</th></tr></thead>
+  <tbody>
+    <tr><td>1</td><td>Job control — <code>Ctrl+Z</code>, <code>fg</code>, <code>bg</code></td><td>kernel</td><td>stop claiming the terminal</td></tr>
+    <tr><td>2</td><td>Live resize; zoom leaves smeared text</td><td>kernel</td><td>relay forwards <code>SIGWINCH</code></td></tr>
+    <tr><td>3</td><td>IPC sockets collide between windows</td><td>kernel</td><td>use an instance ID, not a PID</td></tr>
+    <tr><td>4</td><td>Colour, <code>clear</code>, <code>less</code>, <code>tput</code></td><td>environment</td><td>explicit <code>--env</code> allowlist</td></tr>
+    <tr><td>5</td><td>terminfo missing for the announced <code>TERM</code></td><td>host filesystem</td><td>degrade to <code>xterm-256color</code></td></tr>
+    <tr><td>6</td><td>"New window here" always opens <code>$HOME</code></td><td>PID namespace</td><td>relay mirrors the shell's cwd</td></tr>
+    <tr><td>7</td><td><code>alacritty msg</code> from your own prompt</td><td>host filesystem</td><td>shim on a host-visible path</td></tr>
+    <tr><td>8</td><td><code>flatpak run &lt;app&gt;</code> traps you in the runtime</td><td>desktop entry</td><td>launcher supplies the config</td></tr>
+    <tr><td>9</td><td>Ctrl+scroll zoom does nothing</td><td>upstream defaults</td><td>bind it (not a sandbox bug)</td></tr>
+  </tbody>
+</table>
+
+<h2>State in the kernel</h2>
+
+<p>These are the hard ones, because kernel objects are global and single-owner.
+They do not respect the two-process-tree split that <code>flatpak-spawn</code>
+creates, and no amount of configuration will make them.</p>
+
+<h3><span class="n">1.</span> The controlling terminal goes to the wrong process</h3>
+<p class="sym"><b>Symptom:</b> <code>bash: cannot set terminal process group (-1)</code>,
+<code>no job control in this shell</code>. <code>Ctrl+Z</code>, <code>fg</code>,
+<code>bg</code> and <code>jobs</code> all silently do nothing.</p>
+
+<p><code>TIOCSCTTY</code> is an exclusive, one-shot claim: the first session to
+grab a PTY owns it permanently. Alacritty does the textbook thing —
+<code>setsid()</code> + <code>TIOCSCTTY</code> in its child, then
+<code>exec</code> — but under Flatpak that child is <code>flatpak-spawn</code>, a
+proxy that only makes a D-Bus call. The proxy performs the land grab; the real
+shell is spawned separately by the portal and arrives to find the terminal
+taken.</p>
+
+<pre><code>flatpak-spawn --host bash -l   pts/0  Ssl+    &lt;- proxy owns the terminal
+bash -l                        ?      Ss      &lt;- the actual shell, tty_nr = 0</code></pre>
+
+<p><b>Fix:</b> a relay that opens a second PTY and deliberately never claims it.
+The portal's own child setup then hands it to the shell automatically. Nothing
+needs to be built to acquire the terminal — something needs to stop stealing it.
+<a href="./pty-job-control.html">Full story here.</a></p>
+
+<h3><span class="n">2.</span> <code>SIGWINCH</code> is never forwarded</h3>
+<p class="sym"><b>Symptom:</b> zoom in and the text near the cursor smears while
+the rest of the screen looks fine. Running programs never learn the terminal
+resized.</p>
+
+<p><code>flatpak-spawn</code> blocks and forwards eight signals — visible in its
+own signal mask, <code>SigBlk: 00000000000a4a07</code> = HUP INT QUIT USR1 USR2
+TERM CONT TSTP. <code>SIGWINCH</code> is not among them, so the kernel delivers
+it to the proxy and it goes in the bin.</p>
+
+<p>The smearing is worth understanding: readline doesn't repaint the screen, it
+repaints <em>its own region</em> using the width it still believes in. One band
+of the terminal gets rewritten against stale geometry while everything around it
+already reflowed. It reads as "the zoom is centred on part of the screen." It
+isn't centred on anything.</p>
+
+<p><b>Fix:</b> the relay is the foreground process group of the outer PTY, so it
+<em>does</em> receive <code>SIGWINCH</code>, and copies the size across.</p>
+
+<h3><span class="n">3.</span> Every window has the same PID</h3>
+<p class="sym"><b>Symptom:</b> the second window opened from the desktop shows
+<code>Unable to create socket: AddrInUse</code> and
+<code>Unable to create log file: File exists</code>.</p>
+
+<p>Alacritty names its IPC socket and log file after its own process ID — a fine
+unique key everywhere except here. Every <code>flatpak run</code> gets a fresh
+PID namespace, so every instance is <strong>PID 2</strong>:</p>
+
+<pre><code>host PID 2129727:  NSpid: 2129727   2
+host PID 2129960:  NSpid: 2129960   2
+host PID 2130588:  NSpid: 2130588   2</code></pre>
+
+<p>The runtime directory and <code>/tmp</code> are shared per <em>application</em>,
+not per instance — which is exactly why <code>alacritty msg</code> can reach
+across instances at all — so the first instance wins both names and every one
+after it collides. The banner is cosmetic; the consequence is that those
+instances have <strong>no IPC socket at all</strong>, so <code>msg</code> from
+their windows drives whichever instance won the race.</p>
+
+<p><b>Fix:</b> <code>/.flatpak-info</code> carries an <code>instance-id</code>
+that genuinely is unique. Use that instead of a PID that isn't.</p>
+
+<h2>State in the environment</h2>
+
+<h3><span class="n">4.</span> The portal launders <code>TERM</code> away</h3>
+<p class="sym"><b>Symptom:</b> no colour anywhere, and every ncurses program
+failing.</p>
+
+<pre><code>tput colors: tput: No value for $TERM and no -T specified
+infocmp:     FAILS
+clear:       TERM environment variable not set.
+less:        tput: No value for $TERM and no -T specified</code></pre>
+
+<p><code>flatpak-spawn --host</code> does not hand the sandbox's environment to
+the host process; the portal starts host processes from the <em>host session's</em>
+environment. Traced across the boundary:</p>
+
+<pre><code>relay          (sandbox)   TERM=alacritty
+flatpak-spawn  (sandbox)   TERM=alacritty
+bash -l        (host)      TERM=&lt;UNSET&gt;</code></pre>
+
+<div class="key">
+<p>This laundering is a <strong>feature</strong>, and the reason this fix has to
+be narrow. It strips <code>LD_LIBRARY_PATH</code>, <code>XDG_CONFIG_HOME</code>,
+<code>GI_TYPELIB_PATH</code> and <code>container=flatpak</code> — without it,
+host programs would start reading the runtime's configuration. The casualty is
+that a terminal's identity is legitimately sandbox-side information that has to
+cross.</p>
+</div>
+
+<p><b>Fix:</b> an explicit <code>--env</code> allowlist — <code>TERM</code>,
+<code>COLORTERM</code>, and later <code>ALACRITTY_SOCKET</code>. An allowlist,
+never a bulk forward.</p>
+
+<h2>State on the host filesystem</h2>
+
+<h3><span class="n">5.</span> terminfo is unreachable</h3>
+<p class="sym"><b>Symptom:</b> none, until someone installs on a host that has
+never heard of your terminal — then every ncurses program fails again despite
+<code>TERM</code> being set correctly.</p>
+
+<p>A <code>TERM</code> value only means something if the host has a matching
+terminfo entry, and a sandboxed app cannot write to the host filesystem to
+install one. <code>alacritty-direct</code> is <em>already</em> missing on the
+machine this was developed on.</p>
+
+<p><b>Fix:</b> a host-side bootstrap that checks and degrades. This is the one
+category with no clean answer — only graceful failure.</p>
+
+<pre><code>announced alacritty            -> alacritty        256 colours
+announced alacritty-direct     -> xterm-256color   256 colours
+announced totally-made-up-term -> xterm-256color   256 colours</code></pre>
+
+<p>It is also why <strong>Ptyxis announces <code>xterm-256color</code></strong>:
+VTE's terminfo is universally present, so it sidesteps the problem entirely by
+never needing a host-side file.</p>
+
+<h3><span class="n">7.</span> The <code>alacritty</code> binary isn't on the host</h3>
+<p class="sym"><b>Symptom:</b> <code>alacritty msg create-window</code> at your
+own prompt returns <code>command not found</code>.</p>
+
+<p>The shell runs on the host; the binary lives inside the Flatpak. The IPC it
+wants is running perfectly well — nothing is wrong with the socket. Re-entering
+the Flatpak is enough, because a second instance shares the first's runtime
+directory and finds the socket by itself.</p>
+
+<p><b>Fix:</b> ship a shim on a host-visible path. The sandbox learns its own
+host-side location from <code>app-path</code> in <code>/.flatpak-info</code>, and
+the relay appends that directory to <code>PATH</code> host-side —
+<em>appended</em>, so a natively installed Alacritty still wins.</p>
+
+<h2>State in the PID namespace</h2>
+
+<h3><span class="n">6.</span> The shell is invisible, so "new window here" fails</h3>
+<p class="sym"><b>Symptom:</b> every new window opens in <code>$HOME</code>,
+wherever you actually were.</p>
+
+<p>Alacritty finds the current directory by reading
+<code>/proc/&lt;tcgetpgrp(pty)&gt;/cwd</code>. The sandbox sees five processes;
+the host has 491, and the shell is not among them.</p>
+
+<p>I wrote this one off as unfixable — it wants OSC 7, and Alacritty's documented
+escape support is OSC 0, 1, 2, 4, 8, 10, 11, 12, 50, 52, 104, 110–112, with no
+7 anywhere. That was wrong, and instructively so. <strong>Alacritty is not
+reading the shell's cwd.</strong> It reads the cwd of whatever holds the
+foreground process group of <em>its own</em> PTY — the relay, on our side of the
+boundary. And the shell already announces its directory in-band, where the relay
+sees every byte.</p>
+
+<pre><code>relay cwd at start        : /home/me
+relay cwd after shell cd  : /home/me/zz-marker-dir
+relay cwd after second cd : /home/me/my-progs</code></pre>
+
+<p><b>Fix:</b> the relay follows OSC 7 and OSC 3008 reports and
+<code>chdir()</code>s to match. Alacritty's existing lookup then returns the
+right answer, unchanged. Note the symmetry with #3 — the same namespace makes a
+PID <em>invisible</em> here and <em>non-unique</em> there.</p>
+
+<h2>Not the sandbox's fault</h2>
+
+<h3><span class="n">8.</span> <code>flatpak run &lt;app-id&gt;</code> was a trap</h3>
+<p>With no arguments it bypassed the shipped config entirely and dropped you into
+a shell trapped inside the runtime — the exact failure the package exists to
+prevent, reachable by the most obvious command anyone would type. A packaging
+mistake, not a platform one. The launcher now supplies the config when the caller
+didn't.</p>
+
+<h3><span class="n">9.</span> Ctrl+scroll doesn't zoom</h3>
+<p>Alacritty's <em>entire</em> default mouse binding table is three lines: right
+click, Ctrl+right click, middle click. <code>WheelUp</code>/<code>WheelDown</code>
+are perfectly bindable and upstream simply doesn't bind them — the ability to
+bind them at all only landed in December 2025, after
+<a href="https://github.com/alacritty/alacritty/issues/2512">seven years</a> of
+requests. Nothing to do with sandboxing; every Alacritty user has this.</p>
+
+<p>It is worth stating plainly because it was reported to me as "zoom is broken
+in the Flatpak," and the obvious move was to assume the sandbox. Two of the three
+zoom complaints <em>were</em> the sandbox. This one wasn't. Only measuring told
+them apart.</p>
+
+<h2>What didn't break</h2>
+
+<p>Worth listing, because a catalogue of failures with nothing on the other side
+of the ledger is not an honest one.</p>
+
+<table>
+  <tbody>
+    <tr><td>Fonts</td><td>803 visible inside the sandbox, host fonts included</td></tr>
+    <tr><td>Clicking URLs</td><td><code>xdg-open</code> present, <code>OpenURI</code> portal reachable</td></tr>
+    <tr><td>Process teardown</td><td>close the window with a host child running — no orphans</td></tr>
+    <tr><td><code>sudo</code></td><td>finds a tty and prompts, once #1 is fixed</td></tr>
+    <tr><td>Shell integration</td><td>Fedora's bash OSC 3008 sequences flow correctly</td></tr>
+    <tr><td>Throughput</td><td>139 MB/s through the relay vs 241 direct — invisible, the renderer is far slower</td></tr>
+  </tbody>
+</table>
+
+<h2>Diagnostics worth stealing</h2>
+
+<p>Most of these generalise to any app that spawns host processes from a
+sandbox.</p>
+
+<pre><code># Does a process have a controlling terminal? Field 7 of stat; 0 = none.
+awk '{print $7}' /proc/&lt;pid&gt;/stat
+
+# Who holds it instead? Look for Ss+ on a pts.
+ps -eo pid,ppid,tty,stat,args | grep flatpak-spawn
+
+# Which signals does the proxy actually forward?
+grep SigBlk /proc/&lt;flatpak-spawn-pid&gt;/status
+
+# Is the sandbox's devpts a separate instance from the host's?
+grep devpts /proc/self/mountinfo
+flatpak run --command=sh &lt;app-id&gt; -c 'grep devpts /proc/self/mountinfo'
+
+# What PID does a sandboxed process think it has?
+grep NSpid /proc/&lt;pid&gt;/status
+
+# What does the sandbox know about its own host-side paths?
+flatpak run --command=cat &lt;app-id&gt; /.flatpak-info</code></pre>
+
+<p>And one that saved a lot of time: Alacritty's own IPC exercises font
+rasterisation, grid reflow, <code>TIOCSWINSZ</code> and SIGWINCH-across-the-boundary
+in a single command, with no key injection needed.</p>
+
+<pre><code>flatpak run --command=alacritty &lt;app-id&gt; msg config 'font.size=30'</code></pre>
+
+<h2>The pattern</h2>
+
+<p>Every boundary above is drawn <em>correctly</em>. None of this is a Flatpak
+bug. It is that a terminal has state which legitimately must cross a boundary
+built to stop state crossing — and that state lives in four different places,
+each of which fails differently.</p>
+
+<p>The other thing worth taking away is a debugging habit. Twice I concluded
+something was unfixable, and twice the answer was already sitting on my own side
+of the boundary: read the relay's <code>/proc</code> entry rather than the
+shell's; read <code>app-path</code> rather than trying to reach the host. Both
+times the instinct was to build machinery to reach across.</p>
+
+<div class="key">
+<p><strong>When a sandbox hides something, don't ask how to reach across. Ask
+what on your side already knows.</strong></p>
+</div>
+
+<div class="warn">
+<strong>Unofficial and unendorsed.</strong> The Alacritty project has declined
+official Flatpak support and asked that unofficial packages not be published.
+This build exists independently under Alacritty's Apache-2.0 licence as a
+teaching example. Report packaging bugs to
+<a href="https://github.com/superuser-miguel/alacritty-flatpak/issues">this repo</a>,
+never to the Alacritty project.
+</div>
+
+<footer>
+  <a href="./">← Back to the project</a> ·
+  <a href="./pty-job-control.html">The debugging write-up</a> ·
+  <a href="https://github.com/superuser-miguel/alacritty-flatpak">Source</a>
+</footer>
+
+</div>
+</body>
+</html>

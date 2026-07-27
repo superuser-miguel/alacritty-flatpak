@@ -107,11 +107,13 @@ proxy rather than to your shell — so job control silently dies:
 <code>tty</code> can't name your terminal. This build fixes it with a PTY relay
 that deliberately refuses to claim the terminal, letting the portal give it to
 the shell instead.</p>
+<p><strong><a href="./everything-that-breaks.html">Everything that breaks when you
+sandbox a terminal</a></strong> — the catalogue: nine failures, each measured,
+with the cause and the fix, plus the diagnostics to find them yourself.</p>
 <p><strong><a href="./pty-job-control.html">The sandboxed terminal that lost its
-job control</a></strong> — the full debugging write-up: what a controlling
-terminal is, why <code>TIOCSCTTY</code>'s one-shot land grab breaks across the
-sandbox boundary, why <code>script(1)</code> can't help, and the sixty-line
-fix.</p>
+job control</a></strong> — the debugging write-up: what a controlling terminal
+is, why <code>TIOCSCTTY</code>'s one-shot land grab breaks across the sandbox
+boundary, why <code>script(1)</code> can't help, and the sixty-line fix.</p>
 
 <h2>Configuration</h2>
 <p>The shell override ships inside the app and is passed by the desktop entry.
