@@ -26,4 +26,19 @@ import = ["~/.config/alacritty/alacritty.toml"]
 
 [terminal.shell]
 program = "/app/libexec/alacritty-host-shell"
-args = ["bash", "-l"]
+# No args: the relay runs the host's own login shell ($SHELL), rather than
+# assuming bash. It also restores TERM/COLORTERM, which the portal strips.
+
+# Ctrl+scroll to zoom. Alacritty supports WheelUp/WheelDown as bindable mouse
+# events but binds neither by default, so scroll-to-zoom does nothing out of
+# the box — surprising for anyone arriving from GNOME Terminal or Ptyxis.
+# The keyboard bindings (Ctrl+= / Ctrl+- / Ctrl+0 to reset) are built in.
+[[mouse.bindings]]
+mouse = "WheelUp"
+mods = "Control"
+action = "IncreaseFontSize"
+
+[[mouse.bindings]]
+mouse = "WheelDown"
+mods = "Control"
+action = "DecreaseFontSize"

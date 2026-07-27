@@ -51,7 +51,16 @@ Two further details fall out of the sandwich:
   group of the outer PTY, so we do receive `SIGWINCH`, and we copy the new
   size onto the inner PTY. Live resize works.
 
-Usage:  alacritty-host-shell [command [args...]]     (default: bash -l)
+The environment needs the same kind of help. The portal starts host processes
+from the *host session* environment rather than the sandbox's, which is correct
+— it keeps the runtime's `LD_LIBRARY_PATH`, `XDG_CONFIG_HOME` and friends from
+leaking into host programs. But it also drops `TERM` and `COLORTERM`, so the
+shell comes up with no terminal type at all: no colour, and `clear`, `less`,
+`tput` and every other ncurses program failing. Those are passed back
+explicitly.
+
+Usage:  alacritty-host-shell [command [args...]]
+        with no arguments, runs the host's own login shell
 """
 
 import errno
@@ -65,6 +74,28 @@ import termios
 
 BUFSIZE = 65536
 OUTER = 0  # Alacritty's PTY, as stdin/stdout
+
+# The terminal's own identity, which the portal would otherwise strip. Kept to a
+# deliberate allowlist — the whole point of the portal's laundering is that the
+# sandbox's environment must not become the host's.
+FORWARD_ENV = ("TERM", "COLORTERM")
+
+# Runs on the host, immediately before the shell. A TERM value only means
+# anything if the host has a matching terminfo entry, and the host may never
+# have heard of Alacritty — a Flatpak cannot install terminfo onto the host, so
+# degrade to something universally present rather than break every ncurses
+# program. (This is why Ptyxis announces xterm-256color: VTE's terminfo is
+# always there.)
+BOOTSTRAP = r"""
+if ! command -v infocmp >/dev/null 2>&1 || ! infocmp "$TERM" >/dev/null 2>&1; then
+    TERM=xterm-256color
+fi
+export TERM
+if [ "$#" -gt 0 ]; then
+    exec "$@"
+fi
+exec "${SHELL:-/bin/sh}" -l
+"""
 
 
 def copy_winsize(src_fd, dst_fd):
@@ -98,8 +129,18 @@ def set_raw(fd):
     return old
 
 
+def host_argv(command):
+    """Build the flatpak-spawn invocation that starts the shell on the host."""
+    argv = ["flatpak-spawn", "--host"]
+    for name in FORWARD_ENV:
+        value = os.environ.get(name)
+        if value:
+            argv.append(f"--env={name}={value}")
+    return argv + ["sh", "-c", BOOTSTRAP, "sh", *command]
+
+
 def main():
-    command = sys.argv[1:] or ["bash", "-l"]
+    command = sys.argv[1:]
 
     master, slave = pty.openpty()
     # Deliberately NO setsid() and NO TIOCSCTTY here. Leaving the inner PTY
@@ -115,7 +156,7 @@ def main():
             os.dup2(slave, fd)
         if slave > 2:
             os.close(slave)
-        os.execvp("flatpak-spawn", ["flatpak-spawn", "--host"] + command)
+        os.execvp("flatpak-spawn", host_argv(command))
         os._exit(127)
 
     os.close(slave)
