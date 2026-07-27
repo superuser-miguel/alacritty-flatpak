@@ -45,6 +45,23 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.17.0-4" date="2026-07-27">
+      <description>
+        <p>
+          Each window launched from the desktop now gets its own IPC socket and
+          log file. Alacritty names both after its process ID, but every Flatpak
+          instance is PID 2 in its own namespace, so instances after the first
+          collided and were left with no working IPC.
+        </p>
+        <p>
+          The terminal can also be driven from its own shell again: an alacritty
+          shim is placed within reach of the host shell, so commands such as
+          "alacritty msg create-window" work from your prompt and address the
+          window you are sitting in. Running the app without an explicit config
+          file no longer bypasses the host shell.
+        </p>
+      </description>
+    </release>
     <release version="0.17.0-3" date="2026-07-27">
       <description>
         <p>

@@ -4,7 +4,7 @@ runtime-version: '25.08'
 sdk: org.freedesktop.Sdk
 sdk-extensions:
   - org.freedesktop.Sdk.Extension.rust-stable
-command: alacritty
+command: alacritty-launch
 
 # Unofficial build. Upstream has explicitly declined official Flatpak support
 # and is not involved in or responsible for this package (see
@@ -55,6 +55,15 @@ modules:
       # PTY relay that gives the host shell a real controlling terminal.
       # python3 ships in the freedesktop Platform, so no host dependency.
       - install -Dm755 alacritty-host-shell /app/libexec/alacritty-host-shell
+      # Host-visible `alacritty` shim. The shell runs outside the sandbox where
+      # the real binary does not exist, so `alacritty msg ...` would fail; this
+      # re-enters the Flatpak. Its own directory, so only this one name is
+      # exposed on the host's PATH.
+      - install -Dm755 alacritty-shim /app/libexec/host-path/alacritty
+      # Per-instance IPC socket and log file. Every Flatpak instance is PID 2 in
+      # its own namespace, and Alacritty names both after its PID, so instances
+      # after the first collide. See the script for the measurements.
+      - install -Dm755 alacritty-launch /app/bin/alacritty-launch
     sources:
       - type: git
         url: https://github.com/alacritty/alacritty.git
@@ -68,3 +77,7 @@ modules:
         path: flatpak.toml
       - type: file
         path: alacritty-host-shell
+      - type: file
+        path: alacritty-shim
+      - type: file
+        path: alacritty-launch

@@ -1,0 +1,60 @@
+#!/bin/sh
+# Give each Flatpak instance its own IPC socket and log file.
+#
+# Alacritty names both after its own process ID:
+#
+#   polling/mod.rs  format!("{}-{}.sock", ipc::socket_prefix(), process::id())
+#   logging.rs      format!("Alacritty-{}.log", process::id())
+#
+# On a normal system that is a fine unique key. Inside Flatpak it is not: every
+# `flatpak run` gets a fresh PID namespace, so Alacritty is PID 2 in all of them.
+# Three running instances, straight from /proc/<pid>/status:
+#
+#   NSpid: 2129727  2
+#   NSpid: 2129960  2
+#   NSpid: 2130588  2
+#
+# The runtime directory and /tmp are shared per *application*, not per instance
+# — which is exactly why `alacritty msg` can reach across instances at all — so
+# every instance after the first collides:
+#
+#   Unable to create socket: Os { code: 98, kind: AddrInUse, ... }
+#   Unable to create log file: File exists (os error 17)
+#
+# The visible cost is an alarming banner. The real cost is that those instances
+# have no IPC socket of their own, so `alacritty msg` from their windows drives
+# whichever instance won the race — new windows opening on the wrong one.
+#
+# /.flatpak-info carries an instance-id that genuinely is unique per instance,
+# so use that instead of a PID that isn't.
+set -eu
+
+# Default to the shipped config unless the caller picked one. Without this,
+# `flatpak run <app-id>` bypasses the host-shell override and drops you into a
+# shell trapped inside the runtime — the exact failure this package exists to
+# avoid, reachable by the most obvious command anyone would type.
+have_config=no
+for arg in "$@"; do
+    case "$arg" in
+        --config-file | --config-file=*) have_config=yes ;;
+    esac
+done
+if [ "$have_config" = no ]; then
+    set -- --config-file /app/share/alacritty/flatpak.toml "$@"
+fi
+
+instance=$(sed -n 's/^instance-id=//p' /.flatpak-info 2>/dev/null | head -1)
+
+if [ -n "$instance" ]; then
+    if [ -n "${XDG_RUNTIME_DIR:-}" ]; then
+        set -- --socket "$XDG_RUNTIME_DIR/Alacritty-$instance.sock" "$@"
+    fi
+    # env::temp_dir() honours TMPDIR, so a per-instance directory separates the
+    # log files without needing Alacritty to know anything about it.
+    if mkdir -p "${TMPDIR:-/tmp}/alacritty-$instance" 2>/dev/null; then
+        TMPDIR="${TMPDIR:-/tmp}/alacritty-$instance"
+        export TMPDIR
+    fi
+fi
+
+exec alacritty "$@"

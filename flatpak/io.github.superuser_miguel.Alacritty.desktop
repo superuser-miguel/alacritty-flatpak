@@ -1,7 +1,7 @@
 [Desktop Entry]
 Type=Application
-TryExec=alacritty
-Exec=alacritty --config-file /app/share/alacritty/flatpak.toml
+TryExec=alacritty-launch
+Exec=alacritty-launch --config-file /app/share/alacritty/flatpak.toml
 Icon=io.github.superuser_miguel.Alacritty
 Terminal=false
 Categories=System;TerminalEmulator;
@@ -15,4 +15,4 @@ Actions=New;
 
 [Desktop Action New]
 Name=New Terminal
-Exec=alacritty --config-file /app/share/alacritty/flatpak.toml
+Exec=alacritty-launch --config-file /app/share/alacritty/flatpak.toml

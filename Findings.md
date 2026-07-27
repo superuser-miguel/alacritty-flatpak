@@ -231,6 +231,40 @@ the bug one layer down.
 The full debugging write-up, with measurements and reproduction steps, is at
 <https://superuser-miguel.github.io/alacritty-flatpak/pty-job-control.html>.
 
+## A fifth refusal, and the claim worth testing (#8719, October 2025)
+
+Postdating every issue quoted at the top of this document:
+[#8770](https://github.com/alacritty/alacritty/issues/8770) was not the last
+word. In **#8719** a Fedora Atomic user offered to maintain a Flathub package.
+Same outcome — *"I'm not interested in maintaining a flatpak and considering the
+mess that snap has created for Alacritty, I have no faith in a third party doing
+it either"*, and, asked directly whether host-spawning support would change
+anything, a one-word *"No."*
+
+The line worth extracting is not from the maintainers. It is from someone
+arguing **for** Flatpak:
+
+> flatpak provides mechanisms that give applications the ability to run processes
+> outside of the sandbox for this exact use case. **Basically supporting flatpak
+> is just a matter of spawning the shell on the host.**
+
+That is a testable claim, and this package is the test. Spawning the shell on
+the host is where the work starts. Five further things break, each needing its
+own fix:
+
+| What breaks | Why |
+|---|---|
+| Job control | the proxy claims the controlling terminal |
+| Colour, `clear`, `less` | the portal launders `TERM` away |
+| terminfo | unreachable; a sandbox cannot write to the host |
+| "New window here" | the PID namespace hides the shell |
+| `alacritty msg`, per-instance state | binary absent host-side; PIDs collide |
+
+None of this argues upstream should reverse course — that is their decision and
+they have now made it five times. The narrower point is that both sides of that
+thread were arguing from assertion. The work is finite, and it is all fixed
+here, but "just spawn the shell on the host" was never true.
+
 This also sharpens the upstream argument quoted at the top of this document.
 kchibisov's objection was that a sandboxed terminal either traps the shell or
 punches a hole to the host. The truer statement is narrower and harder: sessions,

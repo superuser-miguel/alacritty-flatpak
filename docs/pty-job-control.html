@@ -472,6 +472,71 @@ relay cwd after second cd : /home/me/my-progs</code></pre>
 bash uses. OSC 7 is absent on this host because <code>vte.sh</code> only arms
 itself for VTE terminals — which is exactly why supporting both matters.</p>
 
+<h3>And the same namespace, breaking the opposite way</h3>
+
+<p>Launching a second window from the desktop shell produced this:</p>
+
+<pre><code>Unable to create socket: Os { code: 98, kind: AddrInUse, message: "Address already in use" }
+Unable to create log file: File exists (os error 17)</code></pre>
+
+<p>Alacritty names its IPC socket and its log file after its own process ID,
+which is a perfectly good unique key everywhere except here. Every
+<code>flatpak run</code> gets a fresh PID namespace, so every instance is
+<strong>PID 2</strong>:</p>
+
+<pre><code>host PID 2129727:  NSpid: 2129727   2
+host PID 2129960:  NSpid: 2129960   2
+host PID 2130588:  NSpid: 2130588   2</code></pre>
+
+<p>The runtime directory and <code>/tmp</code> are shared per <em>application</em>,
+not per instance — which is precisely why <code>alacritty msg</code> can reach
+across instances at all — so the first instance wins both names and every one
+after it collides. The banner is cosmetic; the consequence is not. Those
+instances have no IPC socket of their own, so <code>alacritty msg</code> from
+their windows drives whichever instance won the race, opening windows on the
+wrong one.</p>
+
+<p>Note the symmetry with the previous section. There the namespace made a PID
+<em>invisible</em>; here it makes PIDs <em>non-unique</em>. Same boundary, two
+opposite failures, both from code that was correct on an ordinary system.
+<code>/.flatpak-info</code> carries an <code>instance-id</code> that genuinely is
+unique per instance, so the launcher uses that instead of a PID that isn't.</p>
+
+<h2>An argument, and a measurement</h2>
+
+<p>In October 2025, someone offered to maintain an Alacritty Flatpak on Flathub
+(<a href="https://github.com/alacritty/alacritty/issues/8719">#8719</a>). It went
+the way the previous four did. But one line in that thread is worth pulling out,
+because it is a technical claim rather than a preference:</p>
+
+<blockquote><p>flatpak provides mechanisms that give applications the ability to
+run processes outside of the sandbox for this exact use case. <strong>Basically
+supporting flatpak is just a matter of spawning the shell on the host.</strong></p></blockquote>
+
+<p>That was said in Flatpak's defence, and this repository is what happens when
+you actually try it. Spawning the shell on the host is where the work
+<em>starts</em>. Past that point sit five separate failures, each needing its own
+fix, none of them obvious until measured:</p>
+
+<table>
+  <thead><tr><th>What breaks</th><th>Why</th></tr></thead>
+  <tbody>
+    <tr><td>Job control</td><td>the proxy claims the controlling terminal</td></tr>
+    <tr><td>Colour, <code>clear</code>, <code>less</code></td><td>the portal launders <code>TERM</code> away</td></tr>
+    <tr><td>terminfo</td><td>unreachable; a sandbox cannot write to the host</td></tr>
+    <tr><td>"New window here"</td><td>the PID namespace hides the shell</td></tr>
+    <tr><td><code>alacritty msg</code>, and per-instance state</td><td>the binary is absent host-side; PIDs collide</td></tr>
+  </tbody>
+</table>
+
+<p>This is not an argument that upstream should change their mind. That is their
+call, they have made it five times, and maintaining a package you do not believe
+in is nobody's idea of a good outcome. It is narrower than that: the claim made
+in Flatpak's <em>defence</em> substantially understated the work, and the people
+making it were, like the people rejecting it, arguing from assertion rather than
+from a build. The work turns out to be finite — every item above is fixed here —
+but "just spawn the shell on the host" was never true.</p>
+
 <h2>The general lesson</h2>
 
 <p><code>flatpak-spawn --host</code> is repeated everywhere as <em>the</em>

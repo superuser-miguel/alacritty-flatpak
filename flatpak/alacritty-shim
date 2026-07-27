@@ -1,0 +1,15 @@
+#!/bin/sh
+# Installed as `alacritty` on a path the HOST shell can see.
+#
+# The shell inside this terminal runs on the host, where the alacritty binary
+# does not exist — it lives inside the Flatpak. So `alacritty msg create-window`
+# from your own prompt would fail with "command not found", even though the IPC
+# it wants to reach is running perfectly well.
+#
+# Re-entering the Flatpak is enough: a second instance of the app shares the
+# first one's runtime directory, finds the IPC socket by itself, and drives the
+# already-running window. No socket path or ALACRITTY_SOCKET needed.
+#
+# The relay appends this directory to PATH, and *appends* deliberately — if you
+# have a real alacritty installed on the host, yours wins.
+exec flatpak run --command=alacritty io.github.superuser_miguel.Alacritty "$@"

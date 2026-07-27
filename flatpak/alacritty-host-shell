@@ -80,7 +80,10 @@ OUTER = 0  # Alacritty's PTY, as stdin/stdout
 # The terminal's own identity, which the portal would otherwise strip. Kept to a
 # deliberate allowlist — the whole point of the portal's laundering is that the
 # sandbox's environment must not become the host's.
-FORWARD_ENV = ("TERM", "COLORTERM")
+# ALACRITTY_SOCKET rides along so `alacritty msg` from your prompt talks to the
+# window you are actually sitting in. Without it the shim falls back to "pick the
+# only socket", which stops being right the moment a second instance exists.
+FORWARD_ENV = ("TERM", "COLORTERM", "ALACRITTY_SOCKET")
 
 # Runs on the host, immediately before the shell. A TERM value only means
 # anything if the host has a matching terminfo entry, and the host may never
@@ -93,6 +96,13 @@ if ! command -v infocmp >/dev/null 2>&1 || ! infocmp "$TERM" >/dev/null 2>&1; th
     TERM=xterm-256color
 fi
 export TERM
+# Put the `alacritty` shim within reach, so `alacritty msg …` works from a shell
+# that lives outside the sandbox. Appended, not prepended: a real alacritty
+# installed on the host takes precedence over ours.
+if [ -n "$ALACRITTY_FLATPAK_BIN" ] && [ -d "$ALACRITTY_FLATPAK_BIN" ]; then
+    PATH="$PATH:$ALACRITTY_FLATPAK_BIN"
+    export PATH
+fi
 if [ "$#" -gt 0 ]; then
     exec "$@"
 fi
@@ -173,6 +183,23 @@ def set_raw(fd):
     return old
 
 
+def host_shim_dir():
+    """Where our `alacritty` shim lives *as the host sees it*.
+
+    The sandbox knows its own host-side location: /.flatpak-info carries an
+    app-path pointing at the exported files. That is how the shell on the far
+    side of the boundary can be handed a path it can actually execute.
+    """
+    try:
+        with open("/.flatpak-info") as info:
+            for line in info:
+                if line.startswith("app-path="):
+                    return line.split("=", 1)[1].strip() + "/libexec/host-path"
+    except OSError:
+        pass
+    return None
+
+
 def host_argv(command):
     """Build the flatpak-spawn invocation that starts the shell on the host."""
     argv = ["flatpak-spawn", "--host"]
@@ -180,6 +207,14 @@ def host_argv(command):
         value = os.environ.get(name)
         if value:
             argv.append(f"--env={name}={value}")
+
+    shim_dir = host_shim_dir()
+    if shim_dir:
+        # Not --env=PATH=…: the sandbox's PATH is not the host's, and clobbering
+        # it would be far worse than the problem being solved. The bootstrap
+        # appends this to whatever PATH the host session actually has.
+        argv.append(f"--env=ALACRITTY_FLATPAK_BIN={shim_dir}")
+
     return argv + ["sh", "-c", BOOTSTRAP, "sh", *command]
 
 
