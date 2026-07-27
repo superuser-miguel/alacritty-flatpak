@@ -28,11 +28,17 @@ git config --local user.name superuser-miguel
 
 The commit email must match an address on the key **and** a verified address on
 the GitHub account, or GitHub will show the commit as Unverified even though the
-signature is valid. The public key also has to be registered at
-<https://github.com/settings/gpg/new> — export it with:
+signature is valid. The public key is already registered on the account, so
+signed commits show the Verified badge immediately. If it ever needs
+re-adding, export it with `gpg --armor --export D67DB8E03D50A8C0` and paste it
+at <https://github.com/settings/gpg/new>.
+
+Confirm a pushed commit was accepted:
 
 ```sh
-gpg --armor --export D67DB8E03D50A8C0
+gh api repos/superuser-miguel/alacritty-flatpak/commits/<sha> \
+  --jq '.commit.verification | {verified, reason}'
+# {"reason":"valid","verified":true}
 ```
 
 > [!WARNING]
