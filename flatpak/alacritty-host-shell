@@ -67,10 +67,12 @@ import errno
 import fcntl
 import os
 import pty
+import re
 import select
 import signal
 import sys
 import termios
+import urllib.parse
 
 BUFSIZE = 65536
 OUTER = 0  # Alacritty's PTY, as stdin/stdout
@@ -96,6 +98,48 @@ if [ "$#" -gt 0 ]; then
 fi
 exec "${SHELL:-/bin/sh}" -l
 """
+
+
+# "Open a new window here" needs the shell's working directory, and Alacritty
+# finds it by reading /proc/<tcgetpgrp(pty)>/cwd. Across the sandbox boundary
+# that fails twice over: the host shell lives in a different PID namespace and
+# is not in /proc at all, and the foreground process group of Alacritty's PTY is
+# *us*, not the shell. So Alacritty reads this relay's cwd — which makes the
+# fix easy, because the shell is already announcing its directory in-band and we
+# see every byte of it. Track the reports and chdir to match, and Alacritty's
+# existing /proc lookup starts returning the right answer with no changes to it.
+#
+#   OSC 7     — the widely-implemented one, a file:// URI.
+#   OSC 3008  — the shell-integration protocol Fedora's bash uses, which carries
+#               cwd= among its fields. (OSC 7 is absent there because vte.sh
+#               only arms itself for VTE terminals.)
+CWD_REPORTS = (
+    re.compile(rb"\x1b\]7;file://[^/\x07\x1b]*(/[^\x07\x1b]*)(?:\x07|\x1b\\)"),
+    re.compile(rb"\x1b\]3008;[^\x07\x1b]*?;cwd=([^;\x07\x1b]*)(?:\x07|\x1b\\)"),
+)
+CWD_TAIL = 4096  # enough to rejoin a report split across two reads
+
+
+def track_cwd(pending, chunk):
+    """Follow the shell's directory reports. Returns the new pending tail."""
+    buf = pending + chunk
+    if b"\x1b]" not in buf:
+        return b""
+
+    newest, end = None, 0
+    for pattern in CWD_REPORTS:
+        for match in pattern.finditer(buf):
+            newest, end = match.group(1), match.end()
+
+    if newest is not None:
+        path = urllib.parse.unquote_to_bytes(newest)
+        try:
+            os.chdir(os.fsdecode(path))
+        except OSError:
+            pass  # host-only path the sandbox can't see; keep the previous one
+        return buf[end:][-CWD_TAIL:]
+
+    return buf[-CWD_TAIL:]
 
 
 def copy_winsize(src_fd, dst_fd):
@@ -187,6 +231,7 @@ def main():
 def _pump(master):
     """Copy bytes between the outer terminal and the inner PTY until EOF."""
     fds = [OUTER, master]
+    pending = b""
     while True:
         try:
             readable, _, _ = select.select(fds, [], [])
@@ -203,7 +248,15 @@ def _pump(master):
                 raise
             if not data:
                 return
-            _write_all(master if fd == OUTER else 1, data)
+            if fd == OUTER:
+                _write_all(master, data)
+            else:
+                # Only the shell's own output can carry directory reports, and
+                # bulk output has no escape sequences at all — so the common
+                # case costs one substring check.
+                if b"\x1b]" in data or pending:
+                    pending = track_cwd(pending, data)
+                _write_all(1, data)
 
 
 def _write_all(fd, data):
