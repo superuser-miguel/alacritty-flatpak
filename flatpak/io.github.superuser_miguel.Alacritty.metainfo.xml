@@ -45,6 +45,22 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.17.0-3" date="2026-07-27">
+      <description>
+        <p>
+          Restores the terminal type: TERM and COLORTERM never reached the
+          shell, so there was no colour and clear, less, tput and every other
+          ncurses program failed. Falls back to xterm-256color on hosts that do
+          not know this terminal.
+        </p>
+        <p>
+          New windows now open in the current directory, Ctrl+scroll zooms, the
+          shell is the host's own login shell rather than always bash, and the
+          window carries the application ID so the desktop shell matches it to
+          its launcher.
+        </p>
+      </description>
+    </release>
     <release version="0.17.0-2" date="2026-07-26">
       <description>
         <p>

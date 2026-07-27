@@ -29,6 +29,16 @@ program = "/app/libexec/alacritty-host-shell"
 # No args: the relay runs the host's own login shell ($SHELL), rather than
 # assuming bash. It also restores TERM/COLORTERM, which the portal strips.
 
+# Alacritty announces itself to the compositor as "Alacritty", but a Flatpak's
+# window has to carry the application ID for the desktop shell to match it to
+# the .desktop file — otherwise the window can show a generic icon and refuse to
+# group under its own launcher. Correct either way; GNOME can also recover the
+# identity from .flatpak-info, but matching the desktop entry is what the
+# convention (and the Flathub linter) expects.
+[window.class]
+instance = "io.github.superuser_miguel.Alacritty"
+general = "io.github.superuser_miguel.Alacritty"
+
 # Ctrl+scroll to zoom. Alacritty supports WheelUp/WheelDown as bindable mouse
 # events but binds neither by default, so scroll-to-zoom does nothing out of
 # the box — surprising for anyone arriving from GNOME Terminal or Ptyxis.

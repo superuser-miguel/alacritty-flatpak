@@ -10,7 +10,7 @@ Name=Alacritty
 GenericName=Terminal
 Comment=A fast, cross-platform, OpenGL terminal emulator (unofficial flatpak build)
 StartupNotify=true
-StartupWMClass=Alacritty
+StartupWMClass=io.github.superuser_miguel.Alacritty
 Actions=New;
 
 [Desktop Action New]
